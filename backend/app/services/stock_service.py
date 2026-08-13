@@ -335,16 +335,31 @@ class StockService:
 
     @staticmethod
     async def refresh_quotes(codes: Optional[List[str]] = None) -> Dict:
-        """刷新行情。codes=None 表示全 A 股
+        """刷新行情。codes=None 表示从 stock 表读所有要抓的代码
 
-        同时回填 stock.name（行情里带的名称）
+        抓取范围（统一来源 = stock 表）：
+        - 基金持仓涉及的股票
+        - 用户自选股涉及的股票
+        （任一来源都会把股票写入 stock 表，所以从 stock 表读即可）
+
+        同时回填 stock.name（行情里带的名称，仅在本地为空时）
         """
         sq = StockQuotesScraper()
         try:
             if codes:
                 items = await sq.fetch_batch(codes)
             else:
-                items = await sq.fetch_all_market()
+                # 从 stock 表读所有 code（单一来源）
+                from app.database import SessionLocal
+                db_q = SessionLocal()
+                try:
+                    rows = db_q.query(Stock.code).all()
+                    codes = [r[0] for r in rows if r[0]]
+                finally:
+                    db_q.close()
+                if not codes:
+                    return {"snapshots": 0}
+                items = await sq.fetch_batch(codes)
         finally:
             await sq.close()
 
@@ -386,7 +401,7 @@ class StockService:
             # 批量插入行情
             db.bulk_insert_mappings(StockQuote, quote_rows)
 
-            # 回填 stock.name
+            # 回填 stock.name（仅在本地为空时才用行情里的名称回填，避免覆写已有的更准名字）
             if stock_updates:
                 for code, name in stock_updates:
                     s = db.query(Stock).filter(Stock.code == code).first()
@@ -412,20 +427,33 @@ class StockService:
         return affected
 
     @staticmethod
-    async def refresh_stock_details(codes: List[str] = None) -> Dict:
-        """回填 stock.name / industry_name（用 emweb 单股接口，push2 限流时也能用）"""
+    async def refresh_stock_details(codes: List[str] = None, ttl_hours: int = 24) -> Dict:
+        """回填 stock.name / industry_name（用 emweb 单股接口，push2 限流时也能用）
+
+        抓取范围（统一来源 = stock 表）：所有在 stock 表里的股票
+        跳过条件：本地已有 industry_name 且 details_fetched_at 在 ttl_hours 内
+        """
+        from datetime import datetime, timedelta
         from app.database import SessionLocal
         db = SessionLocal()
         try:
             if codes is None:
-                # 默认：所有有 holdings 的 + 库里没有 industry_name 的
-                holding_codes = [c for (c,) in db.query(FundHolding.stock_code).distinct().all() if c]
-                already = {
+                now = datetime.utcnow()
+                cutoff = now - timedelta(hours=ttl_hours)
+                # 已有完整信息且未过期的股票 → 跳过
+                fresh = {
                     c for c, in db.query(Stock.code)
-                    .filter(Stock.industry_name.isnot(None), Stock.industry_name != "")
+                    .filter(
+                        Stock.industry_name.isnot(None),
+                        Stock.industry_name != "",
+                        Stock.details_fetched_at.isnot(None),
+                        Stock.details_fetched_at >= cutoff,
+                    )
                     .all()
                 }
-                codes = sorted(set(holding_codes) - already)
+                # 待抓：stock 表所有 code - 已 fresh 的
+                all_codes = [c for (c,) in db.query(Stock.code).all() if c]
+                codes = sorted(set(all_codes) - fresh)
             if not codes:
                 return {"details": 0}
         finally:
@@ -440,6 +468,7 @@ class StockService:
         db = SessionLocal()
         try:
             n = 0
+            now = datetime.utcnow()
             for it in items:
                 code = it["code"]
                 name = it.get("name")
@@ -453,6 +482,7 @@ class StockService:
                         market=market,
                         secid=f"{market}.{code}",
                         industry_name=industry,
+                        details_fetched_at=now,
                     )
                     db.add(s)
                 else:
@@ -460,6 +490,8 @@ class StockService:
                         s.name = name
                     if industry and not s.industry_name:
                         s.industry_name = industry
+                    # 只要走了抓取就刷新时间，避免被反复选中
+                    s.details_fetched_at = now
                 n += 1
             db.commit()
         finally:

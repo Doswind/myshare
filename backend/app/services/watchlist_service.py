@@ -1,6 +1,7 @@
 """自选股业务层"""
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy.orm import Session
@@ -15,15 +16,47 @@ from app.scrapers.stock_detail import StockDetailScraper
 
 logger = logging.getLogger(__name__)
 
+# 详情抓取 TTL：24h 内认为本地详情有效，不再远程抓
+DETAILS_TTL = timedelta(hours=24)
+# 单只股票的远程抓取超时（防被卡住）
+FETCH_TIMEOUT = 8.0
+
 
 class WatchlistService:
     """自选股管理 + 行情 + 基金关注度"""
 
+    # 按 code 维度分配锁，避免同一只股票被多用户/多次并发抓取
+    _code_locks: Dict[str, asyncio.Lock] = {}
+    _locks_guard = asyncio.Lock()
+
+    @classmethod
+    async def _get_code_lock(cls, code: str) -> asyncio.Lock:
+        """惰性分配 per-code 锁，并定期清理空闲锁防止内存膨胀"""
+        async with cls._locks_guard:
+            lock = cls._code_locks.get(code)
+            if lock is None:
+                lock = asyncio.Lock()
+                cls._code_locks[code] = lock
+            # 清理：当字典过大时（>500），清理空闲锁
+            if len(cls._code_locks) > 500:
+                for k, v in list(cls._code_locks.items()):
+                    if not v.locked():
+                        cls._code_locks.pop(k, None)
+            return lock
+
     @staticmethod
     def _enrich(db: Session, w: Watchlist) -> Dict[str, Any]:
-        """把 watchlist 行扩展为带行情和基金关注度的 dict"""
+        """把 watchlist 行扩展为带行情、股票基本信息、基金关注度的 dict
+        名称 / 行业 / market 全部从 stock 表查（单一来源）"""
         code = w.code
         out = w.to_dict()
+
+        # 股票基本信息（name / industry / market / secid）从 stock 表查
+        s = db.query(Stock).filter(Stock.code == code).first()
+        out["name"] = s.name if s else w.name  # 兜底用旧的 w.name（迁移期兼容）
+        out["industry_name"] = s.industry_name if s else None
+        out["market"] = s.market if s else (1 if code.startswith(("5", "6", "9")) else 0)
+        out["secid"] = s.secid if s else f"{1 if code.startswith(('5','6','9')) else 0}.{code}"
 
         # 行情
         q = (
@@ -43,11 +76,6 @@ class WatchlistService:
         else:
             out["price"] = None
             out["change_pct"] = None
-
-        # 行业
-        s = db.query(Stock).filter(Stock.code == code).first()
-        out["industry_name"] = s.industry_name if s else None
-        out["market"] = s.market if s else (1 if code.startswith(("5", "6", "9")) else 0)
 
         # 基金关注度：哪些主力基金重仓了
         latest = (
@@ -94,23 +122,23 @@ class WatchlistService:
         market = 1 if code.startswith(("5", "6", "9")) else 0
         secid = f"{market}.{code}"
 
-        # 确保 stock 行存在
+        # 1) 确保 stock 行存在（共享表，跨用户复用）
         s = db.query(Stock).filter(Stock.code == code).first()
-        if not s:
+        if s is None:
             s = Stock(code=code, name=name or "", market=market, secid=secid)
             db.add(s)
             db.flush()
         elif name and (not s.name or s.name == code):
             s.name = name
 
-        # watchlist 行（按 (user_id, code) 唯一）
+        # 2) watchlist 行（只存映射 + 个性化字段，不存股票数据）
         w = (
             db.query(Watchlist)
             .filter(Watchlist.user_id == user_id, Watchlist.code == code)
             .first()
         )
         if not w:
-            w = Watchlist(user_id=user_id, code=code, name=s.name or name or "", note=note)
+            w = Watchlist(user_id=user_id, code=code, note=note)
             db.add(w)
         else:
             if note:
@@ -153,36 +181,128 @@ class WatchlistService:
         db.commit()
         return True
 
-    @staticmethod
-    async def resolve_name(code: str) -> Optional[str]:
-        """异步：从东财抓 name（添加时如果 stock 表没有就用这个补）"""
-        sc = StockDetailScraper()
-        try:
-            item = await sc.fetch_one(code)
-            if item and item.get("name"):
-                return item["name"]
-        except Exception as e:
-            logger.warning("抓 %s 名称失败: %s", code, e)
-        finally:
-            await sc.close()
-        return None
+    @classmethod
+    async def resolve_name(cls, db: Session, code: str) -> Optional[str]:
+        """异步：取股票名称
+        1) 本地有 name 且非空 → 直接返回
+        2) 本地无 / 失效 → 加 per-code 锁后远程抓
+        """
+        s = db.query(Stock).filter(Stock.code == code).first()
+        if s and s.name and s.name != code:
+            return s.name
 
-    @staticmethod
-    async def resolve_detail(code: str) -> Optional[Dict[str, Any]]:
-        """异步：从东财抓 name + industry（一次性）"""
-        sc = StockDetailScraper()
-        try:
-            item = await sc.fetch_one(code)
-            if item:
+        lock = await cls._get_code_lock(code)
+        async with lock:
+            # 双重检查：拿到锁后再查一次
+            s = db.query(Stock).filter(Stock.code == code).first()
+            if s and s.name and s.name != code:
+                return s.name
+
+            sc = StockDetailScraper()
+            try:
+                item = await asyncio.wait_for(sc.fetch_one(code), timeout=FETCH_TIMEOUT)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning("抓 %s 名称失败: %s", code, e)
+                return None
+            finally:
+                await sc.close()
+
+            if not item or not item.get("name"):
+                return None
+
+            name = item["name"]
+            now = datetime.utcnow()
+            if s is None:
+                s = Stock(
+                    code=code,
+                    name=name,
+                    market=item.get("market") or (1 if code.startswith(("5", "6", "9")) else 0),
+                    secid=item.get("secid") or f"{1 if code.startswith(('5','6','9')) else 0}.{code}",
+                    details_fetched_at=now,
+                )
+                db.add(s)
+            else:
+                s.name = name
+                s.details_fetched_at = now
+            db.commit()
+            return name
+
+    @classmethod
+    async def resolve_detail(cls, db: Session, code: str) -> Optional[Dict[str, Any]]:
+        """异步：取股票详情（name + industry + market + secid）
+        1) 本地有完整信息（name 非空 + industry_name 非空）且未过 TTL → 直接返回
+        2) 否则 → 加 per-code 锁后远程抓
+        """
+        s = db.query(Stock).filter(Stock.code == code).first()
+        now = datetime.utcnow()
+        if s and s.name and s.industry_name:
+            fresh = s.details_fetched_at and (now - s.details_fetched_at) < DETAILS_TTL
+            if fresh:
                 return {
-                    "name": item.get("name"),
-                    "industry": item.get("industry"),
-                    "industry_path": item.get("industry_path"),
-                    "market": item.get("market"),
-                    "secid": item.get("secid"),
+                    "name": s.name,
+                    "industry": s.industry_name,
+                    "industry_path": None,
+                    "market": s.market,
+                    "secid": s.secid,
                 }
-        except Exception as e:
-            logger.warning("抓 %s 详情失败: %s", code, e)
-        finally:
-            await sc.close()
-        return None
+
+        lock = await cls._get_code_lock(code)
+        async with lock:
+            # 双重检查
+            s = db.query(Stock).filter(Stock.code == code).first()
+            if s and s.name and s.industry_name:
+                fresh = s.details_fetched_at and (now - s.details_fetched_at) < DETAILS_TTL
+                if fresh:
+                    return {
+                        "name": s.name,
+                        "industry": s.industry_name,
+                        "industry_path": None,
+                        "market": s.market,
+                        "secid": s.secid,
+                    }
+
+            sc = StockDetailScraper()
+            try:
+                item = await asyncio.wait_for(sc.fetch_one(code), timeout=FETCH_TIMEOUT)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning("抓 %s 详情失败: %s", code, e)
+                return None
+            finally:
+                await sc.close()
+
+            if not item:
+                return None
+
+            name = item.get("name")
+            industry = item.get("industry")
+            market = item.get("market")
+            secid = item.get("secid")
+            fetched_at = datetime.utcnow()
+            if s is None:
+                s = Stock(
+                    code=code,
+                    name=name or code,
+                    market=market if market is not None else (1 if code.startswith(("5", "6", "9")) else 0),
+                    secid=secid or f"{1 if code.startswith(('5','6','9')) else 0}.{code}",
+                    industry_name=industry,
+                    details_fetched_at=fetched_at,
+                )
+                db.add(s)
+            else:
+                if name and (not s.name or s.name == s.code):
+                    s.name = name
+                if industry and not s.industry_name:
+                    s.industry_name = industry
+                if market is not None:
+                    s.market = market
+                if secid:
+                    s.secid = secid
+                s.details_fetched_at = fetched_at
+            db.commit()
+            return {
+                "name": s.name,
+                "industry": s.industry_name,
+                "industry_path": item.get("industry_path"),
+                "market": s.market,
+                "secid": s.secid,
+            }

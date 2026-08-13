@@ -55,17 +55,47 @@ def _migrate_columns():
     if "watchlist" in insp.get_table_names():
         _migrate_watchlist_per_user()
 
+    if "stock" in insp.get_table_names():
+        _migrate_stock_details_fetched_at()
+
+
+def _migrate_stock_details_fetched_at():
+    """stock 表加 details_fetched_at 列：用于详情抓取的 TTL 缓存
+    已有 industry_name 的视为「已抓过」并回填时间为当前，避免迁移后立即触发全量重抓
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("stock")}
+    if "details_fetched_at" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE stock ADD COLUMN details_fetched_at DATETIME"))
+        # 已抓过详情的（行业非空）→ 回填为当前时间，避免被重新抓
+        result = conn.execute(
+            text(
+                "UPDATE stock SET details_fetched_at = CURRENT_TIMESTAMP "
+                "WHERE industry_name IS NOT NULL AND industry_name != ''"
+            )
+        )
+        if result.rowcount:
+            logger.info("DB 迁移: stock 添加 details_fetched_at 列，回填 %d 条历史记录", result.rowcount)
+        else:
+            logger.info("DB 迁移: stock 添加 details_fetched_at 列")
+
 
 def _migrate_watchlist_per_user():
-    """自选股按用户隔离：
+    """自选股按用户隔离 + 复合主键 (user_id, code)：
     1) 加 user_id 列（默认 0）
     2) 把历史数据全部归属给 admin（id=1）—— 升级前的 watchlist 是全局共享的
     3) 建复合唯一索引 (user_id, code)
+    4) 重建主键为 (user_id, code)（SQLite 不支持换主键，需复制重建）
     """
     from sqlalchemy import inspect, text
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("watchlist")}
     indexes = {i["name"] for i in insp.get_indexes("watchlist")}
+    pk = insp.get_pk_constraint("watchlist") or {}
+    pk_cols = pk.get("constrained_columns") or []
 
     with engine.begin() as conn:
         # 1) 加 user_id 列
@@ -90,7 +120,6 @@ def _migrate_watchlist_per_user():
 
         # 3) 复合唯一索引 (user_id, code)
         if "idx_watchlist_user_code" not in indexes:
-            # 先清理可能存在的重复（同一 user_id 重复 code）—— 保留 sort_order 最大的
             conn.execute(
                 text(
                     """
@@ -106,7 +135,47 @@ def _migrate_watchlist_per_user():
             )
             logger.info("DB 迁移: watchlist 创建复合唯一索引 (user_id, code)")
 
-        # 4) 复合索引 (user_id, sort_order)
+        # 4) 重建主键为 (user_id, code)
+        if pk_cols != ["user_id", "code"]:
+            logger.info("DB 迁移: watchlist 重建主键为 (user_id, code)（旧主键=%s）", pk_cols)
+            # SQLite 不支持换主键，必须：建新表 → 拷贝 → 删旧 → 改名
+            conn.execute(text("ALTER TABLE watchlist RENAME TO watchlist__old"))
+            # 用期望 schema 建新表
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE watchlist (
+                        code VARCHAR(8) NOT NULL,
+                        user_id INTEGER NOT NULL DEFAULT 0,
+                        name VARCHAR(60) NOT NULL DEFAULT '',
+                        note VARCHAR(120) DEFAULT '',
+                        sort_order INTEGER DEFAULT 0,
+                        created_at DATETIME,
+                        updated_at DATETIME,
+                        CONSTRAINT pk_watchlist_user_code PRIMARY KEY (user_id, code)
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_watchlist_user_id ON watchlist (user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_watchlist_user_order ON watchlist (user_id, sort_order)"))
+            # 拷贝数据（去重）
+            conn.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO watchlist (code, user_id, name, note, sort_order, created_at, updated_at)
+                    SELECT code, user_id, name, note, sort_order, created_at, updated_at
+                    FROM watchlist__old
+                    """
+                )
+            )
+            conn.execute(text("DROP TABLE watchlist__old"))
+            # idx_watchlist_user_code 是 UNIQUE INDEX，新表重建会因主键自带唯一性而无必要，
+            # 但保留以兼容仍可能在某些查询计划里被引用的情况
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_user_code ON watchlist (user_id, code)"))
+            logger.info("DB 迁移: watchlist 复合主键 (user_id, code) 重建完成")
+
+        # 5) 复合索引 (user_id, sort_order) 已包含在 4) 里，这里兜底
         if "idx_watchlist_user_order" not in indexes:
             conn.execute(
                 text("CREATE INDEX IF NOT EXISTS idx_watchlist_user_order ON watchlist (user_id, sort_order)")
