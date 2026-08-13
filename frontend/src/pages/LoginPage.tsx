@@ -1,6 +1,6 @@
 // 登录页
 import { useState, type FormEvent } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { authApi } from "@/api/auth";
 import { LogIn, AlertCircle } from "lucide-react";
@@ -8,8 +8,8 @@ import { LogIn, AlertCircle } from "lucide-react";
 export default function LoginPage() {
   const { login, user, updateUser } = useAuth();
   const nav = useNavigate();
-  const loc = useLocation();
-  const from = (loc.state as { from?: string } | null)?.from || "/";
+  // 登录后默认进入持仓看板（无论普通用户还是管理员）
+  const HOME = "/";
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -31,7 +31,7 @@ export default function LoginPage() {
         setForcing(true);
         setOldPw(password);
       } else {
-        nav(from, { replace: true });
+        nav(HOME, { replace: true });
       }
     } catch (e: unknown) {
       setErr((e as Error).message || "登录失败");
@@ -56,7 +56,7 @@ export default function LoginPage() {
       await authApi.changePassword(oldPw, newPw);
       // 刷新 user 信息
       if (user) updateUser({ ...user, must_change_password: false });
-      nav(from, { replace: true });
+      nav(HOME, { replace: true });
     } catch (e: unknown) {
       setErr((e as Error).message || "改密失败");
     } finally {
