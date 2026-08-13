@@ -38,3 +38,13 @@ export const triggerQuoteRefresh = (only_holdings = true) =>
 
 export const triggerSectorRefresh = () =>
   client.post("/jobs/sectors/refresh").then((r) => r.data);
+
+/** 清理卡住的 running 任务（>stuckMinutes 分钟） */
+export const cleanupStuckJobs = (stuckMinutes = 30) =>
+  client
+    .post<{ cleaned_count: number; cleaned: { log_id: number; job_id: string }[] }>(
+      "/jobs/cleanup-stuck",
+      null,
+      { params: { stuck_minutes: stuckMinutes } }
+    )
+    .then((r) => r.data);

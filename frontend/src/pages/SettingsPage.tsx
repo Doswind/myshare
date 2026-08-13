@@ -17,6 +17,8 @@ import {
 import type { CrawlConfig } from "@/types/api";
 import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock, Clock } from "lucide-react";
 import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
+import { useAuth } from "@/contexts/AuthContext";
+import { cleanupStuckJobs } from "@/api/stocks";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -47,6 +49,10 @@ export default function SettingsPage() {
 
   const [busy, setBusy] = useState<string | null>(null);
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
+  // 每秒 +1 触发 running 任务耗时重新渲染
+  const [tick, setTick] = useState(0);
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin ?? false;
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [confirmState, setConfirmState] = useState<(ConfirmOptions & { onOk: () => void }) | null>(null);
   const [draftConfigs, setDraftConfigs] = useState<Record<string, CrawlConfig>>({});
@@ -83,6 +89,14 @@ export default function SettingsPage() {
     }, 1000);
     return () => clearInterval(t);
   }, [cooldowns]);
+
+  // running 任务耗时 tick（每 1s 触发一次重渲染）
+  useEffect(() => {
+    const hasRunning = jobs.some((j) => j.status === "running");
+    if (!hasRunning) return;
+    const t = setInterval(() => setTick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [jobs]);
 
   const showToast = (type: "ok" | "err", msg: string) => {
     setToast({ type, msg });
@@ -321,55 +335,112 @@ export default function SettingsPage() {
 
       {/* 任务日志 */}
       <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
-        <div className="px-3 py-2 border-b border-slate-100 text-[12px] text-slate-700 font-medium">
-          最近任务日志（最新 50 条）
+        <div className="px-3 py-2 border-b border-slate-100 text-[12px] text-slate-700 font-medium flex items-center justify-between">
+          <span>最近任务日志（最新 50 条）</span>
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setConfirmState({
+                  title: "清理卡住的任务？",
+                  description: "将把 running 状态超过 30 分钟的任务标记为 failed，并释放对应 JobGuard 锁。\n不会影响正在运行（<30 分钟）的任务。",
+                  confirmText: "清理",
+                  variant: "warning",
+                  onOk: async () => {
+                    setConfirmState(null);
+                    try {
+                      const r = await cleanupStuckJobs(30);
+                      qc.invalidateQueries({ queryKey: ["job-logs"] });
+                      qc.invalidateQueries({ queryKey: ["job-running"] });
+                      showToast("ok", `已清理 ${r.cleaned_count} 条卡住任务${r.cleaned.length ? `（${r.cleaned.map((x) => x.job_id).join("、")}）` : ""}`);
+                    } catch (e: any) {
+                      showToast("err", `清理失败：${formatErr(e)}`);
+                    }
+                  },
+                });
+              }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 text-[11px]"
+            >
+              <AlertCircle className="w-3 h-3" /> 清理卡住任务
+            </button>
+          )}
+        </div>
+        <div className="text-[10px] text-slate-400 px-3 py-1 bg-slate-50 border-b border-slate-100">
+          「开始时间」= 任务启动时间 ·「耗时」= 当前 - 开始时间（运行中实时刷新）·「结束时间」= 任务正常完成 / 失败 / 取消的时间
         </div>
         <table className="w-full text-[12px]">
           <thead className="bg-slate-50 text-slate-500 text-[11px]">
             <tr>
-              <th className="text-left px-3 py-1.5 font-normal">时间</th>
               <th className="text-left px-3 py-1.5 font-normal">任务</th>
               <th className="text-left px-3 py-1.5 font-normal">状态</th>
+              <th className="text-left px-3 py-1.5 font-normal">开始时间</th>
+              <th className="text-right px-3 py-1.5 font-normal">耗时</th>
+              <th className="text-left px-3 py-1.5 font-normal">结束时间</th>
               <th className="text-right px-3 py-1.5 font-normal">处理数</th>
               <th className="text-left px-3 py-1.5 font-normal">错误</th>
             </tr>
           </thead>
           <tbody>
             {jobs.length === 0 && (
-              <tr><td colSpan={5} className="text-center text-slate-400 py-4">暂无日志</td></tr>
+              <tr><td colSpan={7} className="text-center text-slate-400 py-4">暂无日志</td></tr>
             )}
-            {jobs.map((j) => (
-              <tr key={j.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-1.5 tabular text-slate-500">
-                  {j.started_at ? new Date(j.started_at).toLocaleString("zh-CN") : "--"}
-                </td>
-                <td className="px-3 py-1.5 text-slate-800">{j.job_name}</td>
-                <td className="px-3 py-1.5">
-                  <span
-                    className={`inline-flex items-center gap-1 text-[11px] ${
-                      j.status === "success"
-                        ? "text-emerald-600"
-                        : j.status === "failed"
-                        ? "text-red-600"
-                        : "text-amber-600"
-                    }`}
-                  >
-                    {j.status === "success" ? (
-                      <CheckCircle2 className="w-3 h-3" />
-                    ) : j.status === "failed" ? (
-                      <AlertCircle className="w-3 h-3" />
-                    ) : (
-                      <Loader2 className="w-3 h-3 animate-spin" />
+            {jobs.map((j) => {
+              const started = j.started_at ? new Date(j.started_at) : null;
+              const finished = j.finished_at ? new Date(j.finished_at) : null;
+              const isRunning = j.status === "running";
+              // 耗时：running = now - started；success/failed = finished - started
+              const durationSec = started
+                ? Math.max(0, Math.floor(((finished ?? new Date(Date.now() + tick * 0)).getTime() - started.getTime()) / 1000))
+                : 0;
+              const isLongRunning = isRunning && durationSec > 600;  // >10 分钟亮红，提示卡住
+              return (
+                <tr key={j.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-3 py-1.5 text-slate-800">{j.job_name}</td>
+                  <td className="px-3 py-1.5">
+                    <span
+                      className={`inline-flex items-center gap-1 text-[11px] ${
+                        j.status === "success"
+                          ? "text-emerald-600"
+                          : j.status === "failed"
+                          ? "text-red-600"
+                          : "text-amber-600"
+                      }`}
+                    >
+                      {j.status === "success" ? (
+                        <CheckCircle2 className="w-3 h-3" />
+                      ) : j.status === "failed" ? (
+                        <AlertCircle className="w-3 h-3" />
+                      ) : (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      )}
+                      {j.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5 tabular text-slate-500">
+                    {started ? (
+                      <span>
+                        {started.toLocaleTimeString("zh-CN", { hour12: false })}
+                        <span className="text-slate-300 ml-1">
+                          {started.toLocaleDateString("zh-CN") === new Date().toLocaleDateString("zh-CN") ? "" : started.toLocaleDateString("zh-CN")}
+                        </span>
+                      </span>
+                    ) : "--"}
+                  </td>
+                  <td className={`px-3 py-1.5 text-right tabular ${isLongRunning ? "text-red-600 font-semibold" : "text-slate-700"}`}>
+                    {formatDuration(durationSec)}
+                    {isLongRunning && <span className="ml-1 text-[10px]">⚠ 卡住</span>}
+                  </td>
+                  <td className="px-3 py-1.5 tabular text-slate-500">
+                    {finished ? finished.toLocaleTimeString("zh-CN", { hour12: false }) : (
+                      <span className="text-amber-600 text-[10px]">进行中…</span>
                     )}
-                    {j.status}
-                  </span>
-                </td>
-                <td className="px-3 py-1.5 text-right tabular text-slate-700">{j.items_processed}</td>
-                <td className="px-3 py-1.5 text-red-500 text-[11px] truncate max-w-xs" title={j.error_message ?? ""}>
-                  {j.error_message ?? ""}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular text-slate-700">{j.items_processed}</td>
+                  <td className="px-3 py-1.5 text-red-500 text-[11px] truncate max-w-xs" title={j.error_message ?? ""}>
+                    {j.error_message ?? ""}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -426,6 +497,16 @@ function formatRemain(sec: number): string {
     return s > 0 ? `${m}分${s}秒` : `${m}分钟`;
   }
   return `${sec}秒`;
+}
+
+/** 格式化耗时：>1h 显示「X 小时 Y 分」，>60s 显示「X 分 Y 秒」，否则「Y 秒」 */
+function formatDuration(sec: number): string {
+  if (sec >= 3600) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return m > 0 ? `${h}h${m}m` : `${h}h`;
+  }
+  return formatRemain(sec);
 }
 
 /** 手动抓取按钮：带繁忙/冷却/锁三态显示 */
