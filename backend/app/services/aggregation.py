@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any, List
 from collections import defaultdict
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct, and_
+from sqlalchemy import func, distinct, and_, or_
 
 from app.models.fund import Fund
 from app.models.holding import FundHolding
@@ -12,6 +12,41 @@ from app.models.stock import Stock
 from app.models.quote import StockQuote
 
 logger = logging.getLogger(__name__)
+
+
+def classify_board(code: str) -> str:
+    """
+    A股板块识别（按代码前缀）
+    - 沪主板: 600/601/603/605
+    - 科创板: 688
+    - 深主板: 000/001/002
+    - 创业板: 300/301
+    - 北交所: 8/9 开头
+    """
+    c = (code or "").strip()
+    if not c:
+        return "其它"
+    if c.startswith(("600", "601", "603", "605")):
+        return "沪主板"
+    if c.startswith("688"):
+        return "科创板"
+    if c.startswith(("000", "001", "002")):
+        return "深主板"
+    if c.startswith(("300", "301")):
+        return "创业板"
+    if c.startswith(("8", "9", "43", "83", "87")):
+        return "北交所"
+    return "其它"
+
+
+# 板块对应的代码前缀集合（用于 SQL LIKE 多选）
+BOARD_PREFIXES: Dict[str, List[str]] = {
+    "沪主板": ["600", "601", "603", "605"],
+    "科创板": ["688"],
+    "深主板": ["000", "001", "002"],
+    "创业板": ["300", "301"],
+    "北交所": ["8", "9", "43", "83", "87"],
+}
 
 
 class AggregationService:
@@ -25,6 +60,7 @@ class AggregationService:
         industry_name: Optional[str] = None,
         price_min: Optional[float] = None,
         price_max: Optional[float] = None,
+        boards: Optional[List[str]] = None,
         page: int = 1,
         page_size: int = 100,
         sort_by: str = "fund_count",
@@ -113,6 +149,15 @@ class AggregationService:
             base = base.filter(StockQuote.price >= price_min)
         if price_max is not None:
             base = base.filter(StockQuote.price <= price_max)
+        if boards:
+            # 板块过滤：按代码前缀的 LIKE 组合
+            prefixes: List[str] = []
+            for b in boards:
+                prefixes.extend(BOARD_PREFIXES.get(b, []))
+            if prefixes:
+                base = base.filter(
+                    or_(*[Stock.code.like(f"{p}%") for p in prefixes])
+                )
 
         rows = base.all()
         if not rows:
@@ -153,6 +198,7 @@ class AggregationService:
                 "code": r.code,
                 "name": r.name or r.code,
                 "industry_name": r.industry_name or "未分类",
+                "board": classify_board(r.code),
                 "price": r.price,
                 "change_pct": r.change_pct,
                 "market_cap": r.market_cap,

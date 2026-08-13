@@ -57,27 +57,34 @@ class FundHoldingsScraper(BaseScraper):
 
     @staticmethod
     def _parse_table(html: str, fund_code: str, report_date: str) -> List[Dict[str, Any]]:
+        """
+        解析基金持仓表。东方财富的实际列顺序：
+        [0] 序号 [1] 股票代码 [2] 股票名称 [3] 最新价 [4] 涨跌幅
+        [5] 相关资讯 [6] 占净值比例 [7] 持股数（万股） [8] 持仓市值（万元）
+
+        同一份 JSONP 可能拼了两个季报（本季 + 上季），所以只取前 topline 条。
+        """
         tree = etree.HTML(html)
         if tree is None:
             return []
         rows = tree.xpath("//table//tr[td]")
         out: List[Dict[str, Any]] = []
         rank = 0
+        seen_codes: set = set()
         for tr in rows:
+            if rank >= 10:
+                break  # 只取前 10
             tds = tr.xpath("./td")
-            if len(tds) < 4:
+            if len(tds) < 9:
                 continue
-            # 第一行通常是表头（序号/股票代码/股票名称/...）
             first_text = "".join(tds[0].xpath(".//text()")).strip()
             if first_text in ("序号", ""):
                 continue
             try:
-                # 可能是股票代码/名称在同一格或分格
                 cells_text = ["".join(td.xpath(".//text()")).strip() for td in tds]
                 stock_code = "".join(tds[1].xpath(".//a/text()") or tds[1].xpath(".//text()")).strip()
                 stock_name = "".join(tds[2].xpath(".//a/text()") or tds[2].xpath(".//text()")).strip()
                 if not re.match(r"^\d{6}$", stock_code):
-                    # 退化：从 text 里提取 6 位数字
                     m = re.search(r"\b(\d{6})\b", cells_text[1] if len(cells_text) > 1 else "")
                     if m:
                         stock_code = m.group(1)
@@ -85,10 +92,14 @@ class FundHoldingsScraper(BaseScraper):
                         continue
                 if not stock_name:
                     stock_name = cells_text[2] if len(cells_text) > 2 else stock_code
-                # 数值列：万/股/万元/%
-                shares = FundHoldingsScraper._parse_num(cells_text, 3)
-                mv = FundHoldingsScraper._parse_num(cells_text, 4)
-                ratio = FundHoldingsScraper._parse_num(cells_text, 5)
+                # 关键修复：列号对应真实数据列
+                ratio = FundHoldingsScraper._parse_num(cells_text, 6)   # 占净值比例 (%)
+                shares = FundHoldingsScraper._parse_num(cells_text, 7)  # 持股数（万股）
+                mv = FundHoldingsScraper._parse_num(cells_text, 8)      # 持仓市值（万元）
+                if stock_code in seen_codes:
+                    # 第二个季报的同支股票，跳过
+                    continue
+                seen_codes.add(stock_code)
                 rank += 1
                 out.append({
                     "fund_code": fund_code,

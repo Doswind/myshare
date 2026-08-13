@@ -14,7 +14,9 @@ from app.models.sector import Sector
 from app.models.stock import Stock
 from app.scrapers.eastmoney_funds import EastmoneyFundsScraper
 from app.scrapers.fund_holdings import FundHoldingsScraper
+from app.scrapers.fund_detail import FundDetailScraper
 from app.config import settings
+from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -238,3 +240,36 @@ class FundService:
             "year": year,
             "season": season,
         }
+
+    @staticmethod
+    async def refresh_fund_details(codes: Optional[List[str]] = None, concurrency: int = 6) -> Dict[str, int]:
+        """
+        抓取基金详情（风险等级 / 评级 / 经理 / 管理人），更新 fund 表
+        - codes: 指定要刷的基金代码列表；None = 刷所有
+        """
+        db: Session = SessionLocal()
+        try:
+            if codes is None:
+                codes = [c for (c,) in db.query(Fund.code).all()]
+            if not codes:
+                return {"updated": 0, "total": 0}
+            fd = FundDetailScraper()
+            data_map = await fd.fetch_many(codes, concurrency=concurrency)
+            updated = 0
+            for code, item in data_map.items():
+                f = db.query(Fund).filter(Fund.code == code).first()
+                if not f:
+                    continue
+                for k, v in item.items():
+                    if k in ("code",) or v is None or v == "":
+                        continue
+                    if hasattr(f, k):
+                        setattr(f, k, v)
+                updated += 1
+                if updated % 50 == 0:
+                    db.commit()
+            db.commit()
+            logger.info("基金详情刷新完成：%d / %d", updated, len(codes))
+            return {"updated": updated, "total": len(codes)}
+        finally:
+            db.close()

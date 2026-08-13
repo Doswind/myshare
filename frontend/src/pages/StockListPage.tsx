@@ -3,16 +3,19 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useFilterStore } from "@/store/filterStore";
 import { useDebounce } from "@/hooks/useDebounce";
-import { fetchHoldingsBySector } from "@/api/holdings";
+import { fetchHoldingsBySector, fetchBoards, type BoardOption } from "@/api/holdings";
 import { fetchFilterDefaults } from "@/api/funds";
 import { fetchWatchlist, type WatchlistItem } from "@/api/watchlist";
 import { FilterBar } from "@/components/fund/FilterBar";
+import { WatchlistAddBox, WatchlistRemoveButton } from "@/components/watchlist/WatchlistAddBox";
 import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
   Star,
   BarChart3,
+  Filter,
+  X,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -48,6 +51,18 @@ function formatErr(e: unknown): string {
   try { return JSON.stringify(e); } catch { return String(e); }
 }
 
+/** 客户端兜底：按代码前缀识别板块（与后端 classify_board 一致） */
+function boardOfCode(code: string): string {
+  const c = (code || "").trim();
+  if (!c) return "其它";
+  if (c.startsWith("600") || c.startsWith("601") || c.startsWith("603") || c.startsWith("605")) return "沪主板";
+  if (c.startsWith("688")) return "科创板";
+  if (c.startsWith("000") || c.startsWith("001") || c.startsWith("002")) return "深主板";
+  if (c.startsWith("300") || c.startsWith("301")) return "创业板";
+  if (c.startsWith("8") || c.startsWith("9") || c.startsWith("43") || c.startsWith("83") || c.startsWith("87")) return "北交所";
+  return "其它";
+}
+
 export default function StockListPage() {
   const nav = useNavigate();
   const {
@@ -58,6 +73,7 @@ export default function StockListPage() {
   const [search, setSearch] = useState("");
   const [localSort, setLocalSort] = useState<SortKey>((sortBy as SortKey) ?? "fund_count");
   const [asc, setAsc] = useState(false);
+  const [selectedBoards, setSelectedBoards] = useState<string[]>([]);
 
   useEffect(() => {
     fetchFilterDefaults().then(hydrate).catch(() => {});
@@ -77,6 +93,7 @@ export default function StockListPage() {
     industry_name: dIndustry || undefined,
     price_min: dPriceMin ?? undefined,
     price_max: dPriceMax ?? undefined,
+    boards: selectedBoards.length ? selectedBoards : undefined,
     sort_by: sortBy,
     page: 1,
     page_size: 500,
@@ -87,6 +104,13 @@ export default function StockListPage() {
     refetchInterval: 5 * 60_000,
     placeholderData: keepPreviousData,
     enabled: tab === "sector",
+  });
+
+  // 板块列表（一次性获取）
+  const { data: boardOptions = [] } = useQuery<BoardOption[]>({
+    queryKey: ["boards"],
+    queryFn: fetchBoards,
+    staleTime: Infinity,
   });
 
   // 自选 Tab
@@ -115,6 +139,7 @@ export default function StockListPage() {
         code: w.code,
         name: w.name,
         industry_name: w.industry_name,
+        board: (w as any).board ?? boardOfCode(w.code),
         price: w.price,
         change_pct: w.change_pct,
         market_cap: w.market_cap,
@@ -135,6 +160,10 @@ export default function StockListPage() {
   // 客户端搜索 + 排序
   const view = useMemo(() => {
     let arr = sourceArr;
+    // 板块过滤（两个 Tab 都生效）
+    if (selectedBoards.length) {
+      arr = arr.filter((s) => selectedBoards.includes(s.board ?? boardOfCode(s.code)));
+    }
     const kw = dSearch.trim();
     if (kw) {
       const k = kw.toLowerCase();
@@ -142,7 +171,8 @@ export default function StockListPage() {
         (s) =>
           s.code?.toLowerCase().includes(k) ||
           s.name?.toLowerCase().includes(k) ||
-          s.industry_name?.toLowerCase().includes(k)
+          s.industry_name?.toLowerCase().includes(k) ||
+          s.board?.toLowerCase().includes(k)
       );
     }
     const sorted = [...arr].sort((a, b) => {
@@ -212,18 +242,64 @@ export default function StockListPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索 代码 / 名称 / 行业"
-          className="flex-1 min-w-[180px] px-2 py-0.5 text-[12px] border border-slate-300 rounded bg-white outline-none focus:border-blue-400"
-        />
-        <span className="text-[11px] text-slate-500 tabular">
-          共 {view.length} / {totalCount} 只
-          {reportDate && <span className="ml-2 text-slate-400">报告期 {reportDate}</span>}
-        </span>
-        {loading && <span className="text-[11px] text-slate-400">刷新中…</span>}
+      <div className="rounded-md border border-slate-200 bg-white px-3 py-2 space-y-1.5">
+        {tab === "watchlist" && (
+          <WatchlistAddBox
+            existingCodes={watchlist.map((w) => w.code)}
+            onAdded={() => {
+              setSearch("");
+            }}
+          />
+        )}
+        {/* 板块过滤 chips */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 shrink-0">
+            <Filter className="w-3 h-3" /> 板块
+          </span>
+          {boardOptions.map((b) => {
+            const active = selectedBoards.includes(b.name);
+            return (
+              <button
+                key={b.name}
+                onClick={() =>
+                  setSelectedBoards((prev) =>
+                    prev.includes(b.name) ? prev.filter((x) => x !== b.name) : [...prev, b.name]
+                  )
+                }
+                className={clsx(
+                  "px-2 py-0.5 rounded-full text-[11px] border transition-colors",
+                  active
+                    ? "bg-blue-500 text-white border-blue-500"
+                    : "bg-white text-slate-600 border-slate-300 hover:border-blue-400 hover:text-blue-600"
+                )}
+                title={`代码前缀: ${b.prefixes.join(", ")}`}
+              >
+                {b.name}
+              </button>
+            );
+          })}
+          {selectedBoards.length > 0 && (
+            <button
+              onClick={() => setSelectedBoards([])}
+              className="text-[11px] text-slate-400 hover:text-slate-600 inline-flex items-center gap-0.5"
+            >
+              <X className="w-3 h-3" /> 清除
+            </button>
+          )}
+          <span className="text-[11px] text-slate-500 tabular ml-auto">
+            共 {view.length} / {totalCount} 只
+            {reportDate && <span className="ml-2 text-slate-400">报告期 {reportDate}</span>}
+            {loading && <span className="ml-2 text-slate-400">刷新中…</span>}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={tab === "watchlist" ? "在自选里搜索 代码 / 名称 / 行业 / 板块" : "搜索 代码 / 名称 / 行业 / 板块"}
+            className="flex-1 min-w-[180px] px-2 py-0.5 text-[12px] border border-slate-300 rounded bg-white outline-none focus:border-blue-400"
+          />
+        </div>
       </div>
 
       <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
@@ -235,6 +311,7 @@ export default function StockListPage() {
                 <th className="text-left px-3 py-1.5 font-normal whitespace-nowrap">代码</th>
                 <th className="text-left px-3 py-1.5 font-normal whitespace-nowrap">名称</th>
                 <th className="text-left px-3 py-1.5 font-normal whitespace-nowrap">行业</th>
+                <th className="text-left px-3 py-1.5 font-normal whitespace-nowrap">板块</th>
                 <th
                   className="text-right px-3 py-1.5 font-normal whitespace-nowrap cursor-pointer hover:text-slate-800"
                   onClick={() => onSort("price")}
@@ -270,13 +347,18 @@ export default function StockListPage() {
                 {tab === "watchlist" && (
                   <th className="text-left px-3 py-1.5 font-normal whitespace-nowrap">备注</th>
                 )}
+                {tab === "watchlist" && (
+                  <th className="text-right px-3 py-1.5 font-normal whitespace-nowrap w-10"></th>
+                )}
               </tr>
             </thead>
             <tbody>
               {view.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={tab === "sector" ? 8 : 7} className="text-center text-slate-400 py-6">
-                    {tab === "watchlist" ? "暂无自选股，请到「设置」添加" : "暂无符合筛选条件的股票"}
+                  <td colSpan={tab === "sector" ? 9 : 9} className="text-center text-slate-400 py-6">
+                    {tab === "watchlist"
+                      ? "暂无自选股，使用上方搜索框添加（支持代码 / 中文名 / 拼音首字母）"
+                      : "暂无符合筛选条件的股票"}
                   </td>
                 </tr>
               )}
@@ -294,6 +376,11 @@ export default function StockListPage() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{s.industry_name ?? "--"}</td>
+                  <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">
+                    <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] bg-slate-50 border border-slate-200">
+                      {s.board ?? boardOfCode(s.code)}
+                    </span>
+                  </td>
                   <td className="px-3 py-1.5 text-right tabular text-slate-700">
                     {s.price != null ? s.price.toFixed(2) : "--"}
                   </td>
@@ -325,6 +412,11 @@ export default function StockListPage() {
                       {(s as any).note || <span className="text-slate-300">--</span>}
                     </td>
                   )}
+                  {tab === "watchlist" && (
+                    <td className="px-3 py-1.5 text-right">
+                      <WatchlistRemoveButton code={s.code} name={s.name} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -335,7 +427,9 @@ export default function StockListPage() {
         <div className="md:hidden max-h-[calc(100vh-200px)] overflow-auto divide-y divide-slate-100">
           {view.length === 0 && !loading && (
             <div className="text-center text-slate-400 py-6 text-[12px]">
-              {tab === "watchlist" ? "暂无自选股，请到「设置」添加" : "暂无符合筛选条件的股票"}
+              {tab === "watchlist"
+                ? "暂无自选股，使用上方搜索框添加"
+                : "暂无符合筛选条件的股票"}
             </div>
           )}
           {view.map((s) => (
@@ -372,6 +466,11 @@ export default function StockListPage() {
                     {s.fund_count ?? 0}只
                   </span>
                   <span>市值 {s.market_cap != null ? `${s.market_cap.toFixed(0)}亿` : "--"}</span>
+                  {tab === "watchlist" && (
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <WatchlistRemoveButton code={s.code} name={s.name} />
+                    </span>
+                  )}
                 </span>
               </div>
             </div>

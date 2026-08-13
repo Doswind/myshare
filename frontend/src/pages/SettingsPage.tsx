@@ -8,13 +8,7 @@ import {
   triggerQuoteRefresh,
   triggerSectorRefresh,
 } from "@/api/stocks";
-import {
-  fetchWatchlist,
-  addWatchlist,
-  removeWatchlist,
-} from "@/api/watchlist";
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Star, Trash2, X } from "lucide-react";
-import { Modal } from "@/components/common/RangeSlider";
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -29,15 +23,8 @@ export default function SettingsPage() {
     queryFn: fetchJobs,
     refetchInterval: 10_000,
   });
-  const { data: watchlist = [], refetch: refetchWatchlist } = useQuery({
-    queryKey: ["watchlist"],
-    queryFn: fetchWatchlist,
-    refetchInterval: 60_000,
-  });
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
-  const [wlCode, setWlCode] = useState("");
-  const [wlNote, setWlNote] = useState("");
 
   const showToast = (type: "ok" | "err", msg: string) => {
     setToast({ type, msg });
@@ -51,41 +38,9 @@ export default function SettingsPage() {
       showToast("ok", `${label}已启动：${r.stock_count ? `涉及 ${r.stock_count} 只股票` : r.message || ""}`);
       qc.invalidateQueries({ queryKey: ["job-logs"] });
     } catch (e: any) {
-      showToast("err", `${label}失败：${e.message}`);
+      showToast("err", `${label}失败：${formatErr(e)}`);
     } finally {
       setBusy(null);
-    }
-  };
-
-  const addWl = async () => {
-    const code = wlCode.trim();
-    if (!/^\d{6}$/.test(code)) {
-      showToast("err", "股票代码必须是 6 位数字");
-      return;
-    }
-    setBusy("wl-add");
-    try {
-      const it = await addWatchlist(code, undefined, wlNote);
-      showToast("ok", `已添加：${it.name || code}`);
-      setWlCode("");
-      setWlNote("");
-      refetchWatchlist();
-      qc.invalidateQueries({ queryKey: ["watchlist"] });
-    } catch (e: any) {
-      showToast("err", `添加失败：${e.message}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const removeWl = async (code: string) => {
-    try {
-      await removeWatchlist(code);
-      showToast("ok", `已移除 ${code}`);
-      refetchWatchlist();
-      qc.invalidateQueries({ queryKey: ["watchlist"] });
-    } catch (e: any) {
-      showToast("err", `移除失败：${e.message}`);
     }
   };
 
@@ -203,104 +158,8 @@ export default function SettingsPage() {
         <p className="text-[10px] text-slate-400 mt-2">
           阈值越低 → 抓取的基金/股票越多（规模 ≥5亿 且 近1年 ≥5% 约 500+ 只基金）。修改后下次刷新基金生效。
         </p>
-      </div>
-
-      {/* 自选股管理 */}
-      <div className="rounded-md border border-slate-200 bg-white p-3">
-        <div className="text-[13px] font-semibold text-slate-800 mb-2 flex items-center gap-1.5">
-          <Star className="w-3.5 h-3.5 text-amber-500" />
-          我的自选股
-        </div>
-        <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px]">
-          <input
-            value={wlCode}
-            onChange={(e) => setWlCode(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addWl()}
-            placeholder="6 位股票代码，如 300401"
-            className="w-44 px-2 py-0.5 border border-slate-300 rounded tabular"
-            maxLength={6}
-          />
-          <input
-            value={wlNote}
-            onChange={(e) => setWlNote(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addWl()}
-            placeholder="备注（可选）"
-            className="flex-1 min-w-[160px] px-2 py-0.5 border border-slate-300 rounded"
-          />
-          <button
-            onClick={addWl}
-            disabled={busy === "wl-add"}
-            className="px-3 py-0.5 rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1"
-          >
-            {busy === "wl-add" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Star className="w-3 h-3" />}
-            添加
-          </button>
-        </div>
-        <div className="text-[11px] text-slate-500 mb-1.5">共 {watchlist.length} 只</div>
-        <div className="rounded border border-slate-100 overflow-hidden">
-          {watchlist.length === 0 ? (
-            <div className="text-center text-slate-400 py-4 text-[12px]">
-              暂无自选股，输入 6 位代码添加
-            </div>
-          ) : (
-            <table className="w-full text-[12px]">
-              <thead className="bg-slate-50 text-slate-500 text-[11px]">
-                <tr>
-                  <th className="text-left px-3 py-1.5 font-normal">代码</th>
-                  <th className="text-left px-3 py-1.5 font-normal">名称</th>
-                  <th className="text-left px-3 py-1.5 font-normal">行业</th>
-                  <th className="text-right px-3 py-1.5 font-normal">现价</th>
-                  <th className="text-right px-3 py-1.5 font-normal">涨跌幅</th>
-                  <th className="text-right px-3 py-1.5 font-normal">重仓基金</th>
-                  <th className="text-left px-3 py-1.5 font-normal">备注</th>
-                  <th className="text-right px-3 py-1.5 font-normal"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {watchlist.map((w) => (
-                  <tr key={w.code} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-1.5 tabular text-slate-500">{w.code}</td>
-                    <td className="px-3 py-1.5 text-slate-800">{w.name || <span className="text-slate-400">加载中…</span>}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{w.industry_name ?? "--"}</td>
-                    <td className="px-3 py-1.5 text-right tabular text-slate-700">
-                      {w.price != null ? w.price.toFixed(2) : "--"}
-                    </td>
-                    <td
-                      className={`px-3 py-1.5 text-right tabular ${
-                        (w.change_pct ?? 0) >= 0 ? "text-up" : "text-down"
-                      }`}
-                    >
-                      {w.change_pct != null ? `${w.change_pct >= 0 ? "+" : ""}${w.change_pct.toFixed(2)}%` : "--"}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular text-slate-700">
-                      {w.fund_count > 0 ? (
-                        <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-100">
-                              {w.fund_count}
-                            </span>
-                      ) : (
-                        <span className="text-slate-400">0</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-1.5 text-slate-500 text-[11px] truncate max-w-[160px]">
-                      {w.note || <span className="text-slate-300">--</span>}
-                    </td>
-                    <td className="px-3 py-1.5 text-right">
-                      <button
-                        onClick={() => removeWl(w.code)}
-                        className="text-slate-400 hover:text-red-500 transition-colors"
-                        title="移除"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <p className="text-[10px] text-slate-400 mt-2">
-          提示：自选股添加后会立即触发一次性行情抓取。在「股票列表」可查看「我的自选」专属分组。
+        <p className="text-[10px] text-slate-400 mt-1">
+          自选股管理已迁移到「股票列表 → 我的自选」Tab。
         </p>
       </div>
 
@@ -372,4 +231,20 @@ export default function SettingsPage() {
       )}
     </div>
   );
+}
+
+function formatErr(e: unknown): string {
+  if (!e) return "未知错误";
+  if (typeof e === "string") return e;
+  const a = e as any;
+  if (a.response?.data?.detail) {
+    const d = a.response.data.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d) && d.length) {
+      return `${d[0].loc?.join(".") || "?"}: ${d[0].msg}`;
+    }
+    return JSON.stringify(d);
+  }
+  if (a.message) return a.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
 }

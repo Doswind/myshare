@@ -19,8 +19,23 @@ export interface WatchlistItem {
   report_date: string | null;
 }
 
+export interface StockSearchHit {
+  code: string;
+  name: string;
+  market: number;
+  secid?: string;
+  industry_name?: string | null;
+  pinyin_full?: string;
+  pinyin_abbr?: string;
+}
+
 export const fetchWatchlist = () =>
   client.get<WatchlistItem[]>("/watchlist").then((r) => r.data);
+
+export const searchStocks = (q: string, limit = 10) =>
+  client
+    .get<StockSearchHit[]>("/stocks/search", { params: { q, limit } })
+    .then((r) => r.data);
 
 export const addWatchlist = (code: string, name?: string, note?: string) =>
   client

@@ -9,6 +9,17 @@ from app.services.stock_service import StockService
 router = APIRouter()
 
 
+@router.get("/search")
+async def search_stocks(
+    q: str = Query(..., min_length=1, description="代码 / 名称 / 拼音首字母"),
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """自选股添加时的智能联想接口：支持代码、中文名、拼音首字母
+    本地 + 东方财富在线搜索（找不到时自动入库）"""
+    return await StockService.search_stocks_with_remote(db, q, limit)
+
+
 @router.get("/{code}")
 async def get_stock(code: str, db: Session = Depends(get_db)):
     s = StockService.get_stock(db, code)

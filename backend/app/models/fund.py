@@ -25,8 +25,11 @@ class Fund(Base):
     ret_5y = Column(Float, comment="近5年收益%")
     ret_this_year = Column(Float, comment="今年来收益%")
     inception_date = Column(String(10), comment="成立日期")
+    inception_return = Column(Float, comment="成立来收益%")
     manager = Column(String(40), comment="基金经理")
     company = Column(String(80), comment="基金公司")
+    risk_level = Column(String(20), comment="风险等级（中高风险/中风险/中低风险/低风险/高风险）")
+    rating = Column(Integer, comment="基金评级（1-5 星，晨星评级）")
     is_main = Column(Integer, default=0, comment="是否主力 0/1")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -55,8 +58,11 @@ class Fund(Base):
             "ret_5y": self.ret_5y,
             "ret_this_year": self.ret_this_year,
             "inception_date": self.inception_date,
+            "inception_return": self.inception_return,
             "manager": self.manager,
             "company": self.company,
+            "risk_level": self.risk_level,
+            "rating": self.rating,
             "is_main": bool(self.is_main),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

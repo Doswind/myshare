@@ -16,11 +16,16 @@ class Stock(Base):
     industry_code = Column(String(16), comment="行业板块代码 BK0xxx")
     industry_name = Column(String(40), comment="行业名称")
     concept_codes = Column(String(255), comment="概念板块代码列表(逗号分隔)")
+    # 拼音相关字段：用于自选股的快速搜索
+    pinyin_full = Column(String(120), comment="名称全拼（小写，无音调）")
+    pinyin_abbr = Column(String(20), comment="名称首字母（小写）")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         Index("idx_stock_industry", "industry_code"),
         Index("idx_stock_industry_name", "industry_name"),
+        Index("idx_stock_pinyin_abbr", "pinyin_abbr"),
+        Index("idx_stock_pinyin_full", "pinyin_full"),
     )
 
     def to_dict(self) -> dict:
@@ -32,5 +37,7 @@ class Stock(Base):
             "industry_code": self.industry_code,
             "industry_name": self.industry_name,
             "concept_codes": self.concept_codes.split(",") if self.concept_codes else [],
+            "pinyin_full": self.pinyin_full or "",
+            "pinyin_abbr": self.pinyin_abbr or "",
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

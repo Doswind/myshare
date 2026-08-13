@@ -124,6 +124,30 @@ async def trigger_stock_detail_refresh(background: BackgroundTasks):
     return {"status": "started", "job_id": "manual_stock_details", "log_id": log_id}
 
 
+@router.post("/fund-details/refresh")
+async def trigger_fund_detail_refresh(background: BackgroundTasks, only_main: bool = True):
+    """手动触发：基金详情（风险等级 / 评级 / 经理 / 管理人）
+    only_main: True = 只刷主力基金（is_main=1，约 500 只，3-5 分钟）
+    """
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        if only_main:
+            from app.models.fund import Fund
+            codes = [c for (c,) in db.query(Fund.code).filter(Fund.is_main == 1).all()]
+        else:
+            codes = [c for (c,) in db.query(Fund.code).all()]
+    finally:
+        db.close()
+
+    async def _task():
+        return await FundService.refresh_fund_details(codes)
+
+    log_id = await _log_start("manual_fund_details", f"手动刷新基金详情({len(codes)}只)")
+    asyncio.create_task(_run_with_log_id("manual_fund_details", f"手动刷新基金详情({len(codes)}只)", _task, log_id))
+    return {"status": "started", "job_id": "manual_fund_details", "log_id": log_id, "fund_count": len(codes)}
+
+
 @router.get("/{log_id}")
 async def get_log(log_id: int, db: Session = Depends(get_db)):
     log = db.query(JobLog).filter(JobLog.id == log_id).first()

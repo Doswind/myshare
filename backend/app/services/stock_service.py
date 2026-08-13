@@ -1,8 +1,11 @@
 """股票业务层"""
 import logging
+import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
+import httpx
+from pypinyin import lazy_pinyin, Style
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -16,6 +19,10 @@ from app.scrapers.sectors import SectorsScraper
 
 logger = logging.getLogger(__name__)
 
+# 东方财富在线搜索接口（支持中文/拼音/代码）
+EM_SEARCH_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+EM_TIMEOUT = 5.0
+
 
 class StockService:
     """股票 + 行情业务"""
@@ -26,6 +33,237 @@ class StockService:
         if not s:
             return None
         return s.to_dict()
+
+    @staticmethod
+    def search_stocks(db: Session, q: str, limit: int = 20) -> List[Dict]:
+        """
+        模糊搜索股票：
+        - 6位数字 → 精确/前缀匹配代码
+        - 纯字母 → 匹配拼音全拼或首字母（以 q 开头更优先，其次包含）
+        - 其它（中文/混合）→ 匹配名称（LIKE '%q%'） + 代码前缀
+        返回按相关度排序的列表
+        """
+        q = (q or "").strip()
+        if not q:
+            return []
+        ql = q.lower()
+        from sqlalchemy import or_, func
+
+        # 1) 纯 6 位数字 → 走代码前缀
+        if q.isdigit() and len(q) == 6:
+            rows = (
+                db.query(Stock)
+                .filter(Stock.code.like(f"{q}%"))
+                .order_by(Stock.code)
+                .limit(limit)
+                .all()
+            )
+            return [s.to_dict() for s in rows]
+
+        # 2) 纯 ASCII 字母 → 走拼音
+        # 注意：Python 的 str.isalpha() 对中文也返回 True，必须用 ascii 判定
+        is_ascii_alpha = bool(ql) and all(c.isascii() and c.isalpha() for c in ql)
+        if is_ascii_alpha:
+            # 优先：首字母开头
+            rows_pref = (
+                db.query(Stock)
+                .filter(Stock.pinyin_abbr.like(f"{ql}%"))
+                .order_by(Stock.pinyin_abbr)
+                .limit(limit)
+                .all()
+            )
+            if len(rows_pref) >= limit:
+                return [s.to_dict() for s in rows_pref]
+            seen = {r.code for r in rows_pref}
+            # 补充：首字母包含
+            extra = (
+                db.query(Stock)
+                .filter(
+                    Stock.pinyin_abbr.like(f"%{ql}%"),
+                    ~Stock.code.in_(seen) if seen else True,
+                )
+                .order_by(Stock.pinyin_abbr)
+                .limit(limit - len(rows_pref))
+                .all()
+            )
+            rows_pref.extend(extra)
+            seen = {r.code for r in rows_pref}
+            # 补充：全拼包含
+            extra2 = (
+                db.query(Stock)
+                .filter(
+                    Stock.pinyin_full.like(f"%{ql}%"),
+                    ~Stock.code.in_(seen) if seen else True,
+                )
+                .order_by(Stock.pinyin_full)
+                .limit(limit - len(rows_pref))
+                .all()
+            )
+            rows_pref.extend(extra2)
+            return [s.to_dict() for s in rows_pref]
+
+        # 3) 其它（中文 / 混合）→ 名称 LIKE + 代码前缀
+        rows = (
+            db.query(Stock)
+            .filter(or_(Stock.name.like(f"%{q}%"), Stock.code.like(f"{q}%")))
+            .order_by(
+                # 名称以 q 开头优先
+                Stock.name.like(f"{q}%").desc(),
+                Stock.code,
+            )
+            .limit(limit)
+            .all()
+        )
+        return [s.to_dict() for s in rows]
+
+    @staticmethod
+    async def _search_remote_em(q: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        东方财富在线搜索（支持中文/拼音/代码），不限本地表
+        返回原始 item：{Code, Name, PinYin, QuoteID, ...}
+        """
+        try:
+            async with httpx.AsyncClient(timeout=EM_TIMEOUT) as client:
+                r = await client.get(
+                    EM_SEARCH_URL,
+                    params={"input": q, "type": 14, "count": limit},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                data = r.json()
+                items = (data.get("QuotationCodeTable") or {}).get("Data") or []
+                return [
+                    {
+                        "code": it.get("Code"),
+                        "name": it.get("Name"),
+                        "pinyin": (it.get("PinYin") or "").lower(),
+                        "secid": it.get("QuoteID"),
+                        "market_type": it.get("MarketType"),
+                        "security_type": it.get("SecurityTypeName"),
+                    }
+                    for it in items
+                    if it.get("Code") and it.get("Name")
+                ]
+        except Exception as e:
+            logger.warning("东方财富在线搜索失败: %s", e)
+            return []
+
+    @staticmethod
+    def _infer_market(code: str) -> int:
+        """根据代码推断沪/深 (1=沪 / 0=深)"""
+        c = (code or "").strip()
+        if not c:
+            return 0
+        if c[0] in ("6", "9"):
+            return 1
+        if c[0] in ("0", "3"):
+            return 0
+        return 0
+
+    @staticmethod
+    def _compute_pinyin(name: str) -> tuple[str, str]:
+        full = "".join(
+            lazy_pinyin(name, style=Style.NORMAL, errors=lambda x: [list(x)[0]] if x else [])
+        ).lower()
+        abbr = "".join(
+            lazy_pinyin(name, style=Style.FIRST_LETTER, errors=lambda x: list(x)[0] if x else "")
+        ).lower()
+        return full, abbr
+
+    @classmethod
+    def upsert_remote_stock(cls, db: Session, em_item: Dict[str, Any]) -> Optional[Stock]:
+        """将东方财富的搜索结果同步到本地 stock 表（已存在则更新拼音/market）"""
+        code = (em_item.get("code") or "").strip()
+        name = (em_item.get("name") or "").strip()
+        if not code or not name:
+            return None
+        s = db.query(Stock).filter(Stock.code == code).first()
+        market = cls._infer_market(code)
+        secid = em_item.get("secid") or f"{market}.{code}"
+        full, abbr = cls._compute_pinyin(name)
+        if s is None:
+            s = Stock(
+                code=code,
+                name=name,
+                market=market,
+                secid=secid,
+                pinyin_full=full,
+                pinyin_abbr=abbr,
+            )
+            db.add(s)
+            db.commit()
+            db.refresh(s)
+            logger.info("自选股同步：新增 stock %s %s", code, name)
+        else:
+            updated = False
+            if s.pinyin_full != full:
+                s.pinyin_full = full
+                updated = True
+            if s.pinyin_abbr != abbr:
+                s.pinyin_abbr = abbr
+                updated = True
+            if updated:
+                db.commit()
+                db.refresh(s)
+        return s
+
+    @classmethod
+    async def search_stocks_with_remote(
+        cls, db: Session, q: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        先本地搜索；本地不足 limit 时回退到东方财富在线搜索
+        同步补全本地没有的股票（写入 stock 表 + 拼音）
+        """
+        local = cls.search_stocks(db, q, limit=limit)
+        if len(local) >= limit:
+            return local
+        remote_items = await cls._search_remote_em(q, limit=limit)
+        if not remote_items:
+            return local
+        local_codes = {s["code"] for s in local}
+        out: List[Dict[str, Any]] = list(local)
+        for it in remote_items:
+            code = it["code"]
+            if code in local_codes:
+                continue
+            # 只取 6 位 A 股
+            if not (code.isdigit() and len(code) == 6):
+                continue
+            s = cls.upsert_remote_stock(db, it)
+            if s:
+                out.append(s.to_dict())
+                local_codes.add(code)
+                if len(out) >= limit:
+                    break
+        return out
+
+    @classmethod
+    async def resolve_to_stock(cls, db: Session, q: str) -> Optional[Dict[str, Any]]:
+        """
+        把任意输入（代码/中文名/拼音）解析成一个 stock 字典
+        - 本地有 → 返回本地
+        - 本地无 → 在线搜索 + 入库
+        - 都找不到 → 返回 None
+        """
+        q = (q or "").strip()
+        if not q:
+            return None
+        local = cls.search_stocks(db, q, limit=1)
+        if local:
+            return local[0]
+        remote_items = await cls._search_remote_em(q, limit=3)
+        if not remote_items:
+            return None
+        ql = q.lower()
+        for it in remote_items:
+            code = it["code"]
+            name = it["name"]
+            py = it.get("pinyin", "")
+            if q == code or ql == py or q == name:
+                s = cls.upsert_remote_stock(db, it)
+                return s.to_dict() if s else None
+        s = cls.upsert_remote_stock(db, remote_items[0])
+        return s.to_dict() if s else None
 
     @staticmethod
     def get_latest_quote(db: Session, code: str) -> Optional[Dict]:
