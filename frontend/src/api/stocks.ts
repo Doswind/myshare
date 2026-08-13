@@ -1,0 +1,32 @@
+import client from "./client";
+import type { Stock, StockQuote, JobLog, ScheduledJob } from "@/types/api";
+
+export const fetchStock = (code: string) =>
+  client.get<Stock>(`/stocks/${code}`).then((r) => r.data);
+
+export const fetchStockQuote = (code: string) =>
+  client.get<StockQuote>(`/stocks/${code}/quote`).then((r) => r.data);
+
+export const fetchFundsHoldingStock = (code: string) =>
+  client.get(`/stocks/${code}/funds`).then((r) => r.data);
+
+export const fetchSectors = () =>
+  client.get("/sectors").then((r) => r.data);
+
+export const fetchIndustryNames = () =>
+  client.get<{ name: string }[]>("/sectors/by-industry").then((r) => r.data);
+
+export const fetchJobs = () =>
+  client.get<JobLog[]>("/jobs").then((r) => r.data);
+
+export const fetchScheduledJobs = () =>
+  client.get<ScheduledJob[]>("/jobs/scheduled").then((r) => r.data);
+
+export const triggerFundRefresh = () =>
+  client.post("/jobs/funds/refresh").then((r) => r.data);
+
+export const triggerQuoteRefresh = (only_holdings = true) =>
+  client.post("/jobs/quotes/refresh", null, { params: { only_holdings } }).then((r) => r.data);
+
+export const triggerSectorRefresh = () =>
+  client.post("/jobs/sectors/refresh").then((r) => r.data);
