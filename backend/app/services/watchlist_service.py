@@ -76,12 +76,17 @@ class WatchlistService:
         return out
 
     @staticmethod
-    def list_watchlist(db: Session) -> List[Dict]:
-        rows = db.query(Watchlist).order_by(Watchlist.sort_order.desc(), Watchlist.created_at.desc()).all()
+    def list_watchlist(db: Session, user_id: int) -> List[Dict]:
+        rows = (
+            db.query(Watchlist)
+            .filter(Watchlist.user_id == user_id)
+            .order_by(Watchlist.sort_order.desc(), Watchlist.created_at.desc())
+            .all()
+        )
         return [WatchlistService._enrich(db, w) for w in rows]
 
     @staticmethod
-    def add_watchlist(db: Session, code: str, name: Optional[str] = None, note: str = "") -> Dict:
+    def add_watchlist(db: Session, user_id: int, code: str, name: Optional[str] = None, note: str = "") -> Dict:
         code = code.strip()
         if not code.isdigit() or len(code) != 6:
             raise ValueError("股票代码必须是 6 位数字")
@@ -98,10 +103,14 @@ class WatchlistService:
         elif name and (not s.name or s.name == code):
             s.name = name
 
-        # watchlist 行
-        w = db.query(Watchlist).filter(Watchlist.code == code).first()
+        # watchlist 行（按 (user_id, code) 唯一）
+        w = (
+            db.query(Watchlist)
+            .filter(Watchlist.user_id == user_id, Watchlist.code == code)
+            .first()
+        )
         if not w:
-            w = Watchlist(code=code, name=s.name or name or "", note=note)
+            w = Watchlist(user_id=user_id, code=code, name=s.name or name or "", note=note)
             db.add(w)
         else:
             if note:
@@ -110,8 +119,18 @@ class WatchlistService:
         return WatchlistService._enrich(db, w)
 
     @staticmethod
-    def update_watchlist(db: Session, code: str, note: Optional[str] = None, sort_order: Optional[int] = None) -> Dict:
-        w = db.query(Watchlist).filter(Watchlist.code == code).first()
+    def update_watchlist(
+        db: Session,
+        user_id: int,
+        code: str,
+        note: Optional[str] = None,
+        sort_order: Optional[int] = None,
+    ) -> Dict:
+        w = (
+            db.query(Watchlist)
+            .filter(Watchlist.user_id == user_id, Watchlist.code == code)
+            .first()
+        )
         if not w:
             raise ValueError(f"自选股 {code} 不存在")
         if note is not None:
@@ -122,8 +141,12 @@ class WatchlistService:
         return WatchlistService._enrich(db, w)
 
     @staticmethod
-    def remove_watchlist(db: Session, code: str) -> bool:
-        w = db.query(Watchlist).filter(Watchlist.code == code).first()
+    def remove_watchlist(db: Session, user_id: int, code: str) -> bool:
+        w = (
+            db.query(Watchlist)
+            .filter(Watchlist.user_id == user_id, Watchlist.code == code)
+            .first()
+        )
         if not w:
             return False
         db.delete(w)

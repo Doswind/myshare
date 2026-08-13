@@ -52,6 +52,66 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE crawl_config ADD COLUMN trading_only_locked BOOLEAN DEFAULT 0"))
                 logger.info("DB 迁移: crawl_config 添加 trading_only_locked 列")
 
+    if "watchlist" in insp.get_table_names():
+        _migrate_watchlist_per_user()
+
+
+def _migrate_watchlist_per_user():
+    """自选股按用户隔离：
+    1) 加 user_id 列（默认 0）
+    2) 把历史数据全部归属给 admin（id=1）—— 升级前的 watchlist 是全局共享的
+    3) 建复合唯一索引 (user_id, code)
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("watchlist")}
+    indexes = {i["name"] for i in insp.get_indexes("watchlist")}
+
+    with engine.begin() as conn:
+        # 1) 加 user_id 列
+        if "user_id" not in cols:
+            conn.execute(text("ALTER TABLE watchlist ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_watchlist_user_id ON watchlist (user_id)"))
+            logger.info("DB 迁移: watchlist 添加 user_id 列")
+
+        # 2) 把 user_id=0 的历史记录全部归属给 admin（id 最小、is_admin=1 的用户）
+        if "user" in insp.get_table_names():
+            admin_row = conn.execute(
+                text("SELECT id FROM user WHERE is_admin = 1 ORDER BY id LIMIT 1")
+            ).first()
+            if admin_row:
+                admin_id = admin_row[0]
+                result = conn.execute(
+                    text("UPDATE watchlist SET user_id = :uid WHERE user_id = 0"),
+                    {"uid": admin_id},
+                )
+                if result.rowcount:
+                    logger.info("DB 迁移: watchlist 把 %d 条历史记录归属给 admin (id=%d)", result.rowcount, admin_id)
+
+        # 3) 复合唯一索引 (user_id, code)
+        if "idx_watchlist_user_code" not in indexes:
+            # 先清理可能存在的重复（同一 user_id 重复 code）—— 保留 sort_order 最大的
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM watchlist
+                    WHERE rowid NOT IN (
+                        SELECT MAX(rowid) FROM watchlist GROUP BY user_id, code
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text("CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_user_code ON watchlist (user_id, code)")
+            )
+            logger.info("DB 迁移: watchlist 创建复合唯一索引 (user_id, code)")
+
+        # 4) 复合索引 (user_id, sort_order)
+        if "idx_watchlist_user_order" not in indexes:
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_watchlist_user_order ON watchlist (user_id, sort_order)")
+            )
+
 
 def get_db():
     """FastAPI 依赖注入：获取 DB session"""

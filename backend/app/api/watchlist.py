@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.deps import get_db, get_current_user
+from app.models.rbac import User
 from app.services.watchlist_service import WatchlistService
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -22,12 +23,19 @@ class UpdateBody(BaseModel):
 
 
 @router.get("")
-async def list_watchlist(db: Session = Depends(get_db)):
-    return WatchlistService.list_watchlist(db)
+async def list_watchlist(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return WatchlistService.list_watchlist(db, user.id)
 
 
 @router.post("")
-async def add_watchlist(body: AddBody, db: Session = Depends(get_db)):
+async def add_watchlist(
+    body: AddBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """添加自选股：code 字段可以是 6 位代码 / 中文名 / 拼音首字母
     本地找不到时自动从东方财富在线搜索 + 入库"""
     from app.models.stock import Stock
@@ -45,7 +53,7 @@ async def add_watchlist(body: AddBody, db: Session = Depends(get_db)):
     resolved_name = s["name"] or body.name
 
     try:
-        item = WatchlistService.add_watchlist(db, resolved_code, resolved_name, body.note)
+        item = WatchlistService.add_watchlist(db, user.id, resolved_code, resolved_name, body.note)
     except ValueError as e:
         raise HTTPException(400, str(e))
     # 异步补 industry（如果还没有）
@@ -67,16 +75,25 @@ async def add_watchlist(body: AddBody, db: Session = Depends(get_db)):
 
 
 @router.patch("/{code}")
-async def update_watchlist(code: str, body: UpdateBody, db: Session = Depends(get_db)):
+async def update_watchlist(
+    code: str,
+    body: UpdateBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     try:
-        return WatchlistService.update_watchlist(db, code, body.note, body.sort_order)
+        return WatchlistService.update_watchlist(db, user.id, code, body.note, body.sort_order)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
 @router.delete("/{code}")
-async def remove_watchlist(code: str, db: Session = Depends(get_db)):
-    ok = WatchlistService.remove_watchlist(db, code)
+async def remove_watchlist(
+    code: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    ok = WatchlistService.remove_watchlist(db, user.id, code)
     if not ok:
         raise HTTPException(404, f"自选股 {code} 不存在")
     return {"ok": True}
