@@ -289,16 +289,26 @@ function CreateUserModal({ roles, onClose, onCreated }: { roles: Role[]; onClose
 }
 
 function EditUserModal({ user, roles, onClose, onSaved }: { user: UserInfo; roles: Role[]; onClose: () => void; onSaved: () => void }) {
+  const [email, setEmail] = useState(user.email);
   const [isActive, setIsActive] = useState(user.is_active);
   const [roleIds, setRoleIds] = useState<number[]>(user.roles.map((r) => r.id));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
-    setSaving(true);
     setErr(null);
+    // 前端先校验邮箱格式
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setErr("邮箱格式不正确，请输入有效的邮箱地址");
+      return;
+    }
+    setSaving(true);
     try {
-      await usersApi.update(user.id, { is_active: isActive, role_ids: roleIds });
+      await usersApi.update(user.id, {
+        email: email !== user.email ? email : undefined,
+        is_active: isActive,
+        role_ids: roleIds,
+      });
       onSaved();
     } catch (e: unknown) {
       setErr(formatErr(e));
@@ -310,8 +320,16 @@ function EditUserModal({ user, roles, onClose, onSaved }: { user: UserInfo; role
   return (
     <Modal title={`编辑用户：${user.username}`} onClose={onClose}>
       {err && <div className="text-[12px] text-red-600 mb-2">{err}</div>}
-      <div className="mb-2 text-[12px] text-slate-600">
-        邮箱：<span className="text-slate-800">{user.email}</span>
+      <div className="mb-2">
+        <div className="text-[11px] text-slate-500 mb-1">邮箱</div>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-[13px] focus:border-blue-500 focus:outline-none"
+          placeholder="user@example.com"
+        />
+        <div className="text-[10px] text-slate-400 mt-0.5">修改后该邮箱将用于密码重置</div>
       </div>
       <div className="mb-2">
         <label className="flex items-center gap-1.5 text-[12px] text-slate-700 cursor-pointer">
