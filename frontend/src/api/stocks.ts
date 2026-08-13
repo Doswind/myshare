@@ -22,6 +22,14 @@ export const fetchJobs = () =>
 export const fetchScheduledJobs = () =>
   client.get<ScheduledJob[]>("/jobs/scheduled").then((r) => r.data);
 
+/** 当前正在运行的任务 + 冷却期（in_memory_locks / cooldowns） */
+export const fetchRunningJobs = () =>
+  client.get<{
+    in_memory_locks: string[];
+    cooldowns: Record<string, number>;
+    db_running_recent: JobLog[];
+  }>("/jobs/running").then((r) => r.data);
+
 export const triggerFundRefresh = () =>
   client.post("/jobs/funds/refresh").then((r) => r.data);
 

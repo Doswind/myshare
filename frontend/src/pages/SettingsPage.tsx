@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchFilterDefaults, updateFilterDefaults, resetFilterDefaults } from "@/api/funds";
 import {
   fetchJobs,
   fetchScheduledJobs,
+  fetchRunningJobs,
   triggerFundRefresh,
   triggerQuoteRefresh,
   triggerSectorRefresh,
@@ -14,7 +15,7 @@ import {
   resetCrawlConfigs,
 } from "@/api/crawlConfig";
 import type { CrawlConfig } from "@/types/api";
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock } from "lucide-react";
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock, Clock } from "lucide-react";
 import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
 
 export default function SettingsPage() {
@@ -35,11 +36,53 @@ export default function SettingsPage() {
     queryFn: fetchCrawlConfigs,
     refetchInterval: 15_000,
   });
+  // 任务运行状态 + 冷却期（每秒刷新）
+  const { data: runningInfo } = useQuery({
+    queryKey: ["job-running"],
+    queryFn: fetchRunningJobs,
+    refetchInterval: 5_000,
+  });
+  const inMemoryLocks: string[] = (runningInfo as any)?.in_memory_locks ?? [];
+  const serverCooldowns: Record<string, number> = (runningInfo as any)?.cooldowns ?? {};
+
   const [busy, setBusy] = useState<string | null>(null);
+  const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [confirmState, setConfirmState] = useState<(ConfirmOptions & { onOk: () => void }) | null>(null);
   const [draftConfigs, setDraftConfigs] = useState<Record<string, CrawlConfig>>({});
   const [saving, setSaving] = useState(false);
+
+  // 同步服务端冷却期到本地
+  useEffect(() => {
+    setCooldowns((prev) => {
+      const next = { ...serverCooldowns };
+      // 保留本地已经开始倒计时的项（避免后端 5s 刷新延迟导致归零）
+      for (const k of Object.keys(prev)) {
+        if (prev[k] > 0 && (!next[k] || next[k] > prev[k])) {
+          next[k] = prev[k];
+        }
+      }
+      return next;
+    });
+  }, [serverCooldowns]);
+
+  // 倒计时
+  useEffect(() => {
+    if (Object.values(cooldowns).every((v) => v <= 0)) return;
+    const t = setInterval(() => {
+      setCooldowns((prev) => {
+        const next: Record<string, number> = {};
+        let changed = false;
+        for (const [k, v] of Object.entries(prev)) {
+          const nv = Math.max(0, v - 1);
+          next[k] = nv;
+          if (nv !== v) changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [cooldowns]);
 
   const showToast = (type: "ok" | "err", msg: string) => {
     setToast({ type, msg });
@@ -52,12 +95,44 @@ export default function SettingsPage() {
       const r = await fn();
       showToast("ok", `${label}已启动：${r.stock_count ? `涉及 ${r.stock_count} 只股票` : r.message || ""}`);
       qc.invalidateQueries({ queryKey: ["job-logs"] });
+      qc.invalidateQueries({ queryKey: ["job-running"] });
     } catch (e: any) {
+      // 429 冷却：把剩余秒数写本地
+      const status = e?.response?.status;
+      if (status === 429) {
+        const remain = Number(e?.response?.headers?.["x-cooldown-remaining"] || 0);
+        if (remain > 0) {
+          setCooldowns((prev) => ({ ...prev, [key]: remain }));
+        }
+      }
       showToast("err", `${label}失败：${formatErr(e)}`);
     } finally {
       setBusy(null);
     }
   };
+
+  /** 二次确认后真正执行 */
+  const confirmAndRun = (
+    key: string,
+    fn: () => Promise<any>,
+    label: string,
+    description: string,
+  ) => {
+    setConfirmState({
+      title: `确认${label}？`,
+      description,
+      confirmText: `开始${label}`,
+      variant: "info",
+      onOk: () => {
+        setConfirmState(null);
+        void run(key, fn, label);
+      },
+    });
+  };
+
+  // 通用冷却判断
+  const cooldown = (key: string) => cooldowns[key] ?? 0;
+  const isInLock = (key: string) => inMemoryLocks.includes(key);
 
   return (
     <div className="space-y-3 max-w-4xl">
@@ -65,30 +140,48 @@ export default function SettingsPage() {
       <div className="rounded-md border border-slate-200 bg-white p-3">
         <div className="text-[13px] font-semibold text-slate-800 mb-2">手动抓取</div>
         <div className="grid grid-cols-3 gap-2">
-          <button
-            onClick={() => run("funds", triggerFundRefresh, "基金抓取")}
-            disabled={busy !== null}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50 text-[12px] text-slate-700 disabled:opacity-50"
-          >
-            {busy === "funds" ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            抓取基金+持仓（约 5–10 分钟）
-          </button>
-          <button
-            onClick={() => run("sectors", triggerSectorRefresh, "行业抓取")}
-            disabled={busy !== null}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50 text-[12px] text-slate-700 disabled:opacity-50"
-          >
-            {busy === "sectors" ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            抓取行业+成分股
-          </button>
-          <button
-            onClick={() => run("quotes", () => triggerQuoteRefresh(true), "行情抓取")}
-            disabled={busy !== null}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50 text-[12px] text-slate-700 disabled:opacity-50"
-          >
-            {busy === "quotes" ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            抓取行情（持仓股）
-          </button>
+          <RefreshButton
+            label="基金+持仓"
+            hint="约 5–10 分钟"
+            busy={busy === "funds"}
+            disabled={busy !== null || cooldown("funds") > 0 || isInLock("manual_funds")}
+            cooldownSec={cooldown("funds")}
+            inLock={isInLock("manual_funds")}
+            onClick={() => confirmAndRun(
+              "funds",
+              triggerFundRefresh,
+              "基金+持仓抓取",
+              "将刷新全量基金列表（约 5000+ 只）并拉取主力基金最新季报持仓。\n首次或重置后可能耗时 10–15 分钟。\n完成后 10 分钟内不允许再次触发。",
+            )}
+          />
+          <RefreshButton
+            label="行业+成分股"
+            hint="约 1–2 分钟"
+            busy={busy === "sectors"}
+            disabled={busy !== null || cooldown("sectors") > 0 || isInLock("manual_sectors")}
+            cooldownSec={cooldown("sectors")}
+            inLock={isInLock("manual_sectors")}
+            onClick={() => confirmAndRun(
+              "sectors",
+              triggerSectorRefresh,
+              "行业+成分股抓取",
+              "将刷新全部行业分类及成分股数据。\n完成后 1 分钟内不允许再次触发。",
+            )}
+          />
+          <RefreshButton
+            label="行情（持仓股）"
+            hint="约 30 秒"
+            busy={busy === "quotes"}
+            disabled={busy !== null || cooldown("quotes") > 0 || isInLock("manual_quotes")}
+            cooldownSec={cooldown("quotes")}
+            inLock={isInLock("manual_quotes")}
+            onClick={() => confirmAndRun(
+              "quotes",
+              () => triggerQuoteRefresh(true),
+              "行情抓取",
+              "将刷新所有持仓股的实时行情（最近 1 分钟快照）。\n完成后 1 分钟内不允许再次触发。",
+            )}
+          />
         </div>
         <p className="text-[10px] text-slate-400 mt-2">
           首次使用请先抓取基金 → 行业 → 行情。完整流程约 10–15 分钟。完成后到「持仓看板」查看。
@@ -323,6 +416,67 @@ function formatErr(e: unknown): string {
   }
   if (a.message) return a.message;
   try { return JSON.stringify(e); } catch { return String(e); }
+}
+
+/** 格式化秒数：>=60 显示「X 分钟 Y 秒」，否则「Y 秒」 */
+function formatRemain(sec: number): string {
+  if (sec >= 60) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return s > 0 ? `${m}分${s}秒` : `${m}分钟`;
+  }
+  return `${sec}秒`;
+}
+
+/** 手动抓取按钮：带繁忙/冷却/锁三态显示 */
+function RefreshButton({
+  label,
+  hint,
+  busy,
+  disabled,
+  cooldownSec,
+  inLock,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  busy: boolean;
+  disabled: boolean;
+  cooldownSec: number;
+  inLock: boolean;
+  onClick: () => void;
+}) {
+  const inCooldown = cooldownSec > 0;
+  // 状态文案优先级：在跑 > 锁中 > 冷却 > 就绪
+  let stateText = hint;
+  let stateColor = "text-slate-400";
+  let Icon = RefreshCw;
+  if (busy) {
+    stateText = "正在抓取…";
+    stateColor = "text-amber-600";
+    Icon = Loader2;
+  } else if (inLock) {
+    stateText = "已被其他任务占用";
+    stateColor = "text-amber-600";
+  } else if (inCooldown) {
+    stateText = `冷却中（${formatRemain(cooldownSec)}）`;
+    stateColor = "text-slate-500";
+    Icon = Clock;
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex flex-col items-center justify-center gap-0.5 px-3 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50 text-[12px] text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+    >
+      <span className="flex items-center gap-1.5">
+        <Icon className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
+        {label}
+      </span>
+      <span className={`text-[10px] ${stateColor}`}>{stateText}</span>
+    </button>
+  );
 }
 
 // ---------- 抓取策略配置子组件 ----------
