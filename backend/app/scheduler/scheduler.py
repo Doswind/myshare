@@ -250,12 +250,15 @@ def _register_one(cfg: CrawlConfig) -> bool:
 
 
 def _wrap_with_window_guard(cfg: CrawlConfig, fn: Callable) -> Callable:
-    """给 interval 任务加窗口/交易日守卫（仅 interval 模式需要）"""
-    if cfg.cron_type != "interval":
-        return fn
+    """给任务加守卫：
+    - trading_only=True 且非交易日 → 跳过
+    - interval 模式下，窗口外 → 跳过
+    - daily 模式：每天都执行（窗口不适用）
+    """
     win_s = _parse_hhmm(cfg.window_start)
     win_e = _parse_hhmm(cfg.window_end)
     trading = bool(cfg.trading_only)
+    is_interval = cfg.cron_type == "interval"
 
     @wraps(fn)
     def wrapped():
@@ -263,7 +266,7 @@ def _wrap_with_window_guard(cfg: CrawlConfig, fn: Callable) -> Callable:
         if trading and not _is_trading_day():
             logger.debug("[sched] %s 跳过（非交易日）", cfg.job_key)
             return
-        if not _in_window(now_t, win_s, win_e):
+        if is_interval and not _in_window(now_t, win_s, win_e):
             logger.debug("[sched] %s 跳过（不在窗口 %s-%s）", cfg.job_key, cfg.window_start, cfg.window_end)
             return
         fn()
@@ -272,7 +275,7 @@ def _wrap_with_window_guard(cfg: CrawlConfig, fn: Callable) -> Callable:
 
 
 def register_jobs():
-    """首次启动：把所有启用任务注册到调度器"""
+    """首次启动：把所有启用任务注册到调度器（所有任务都套窗口/交易日守卫）"""
     db = SessionLocal()
     try:
         configs = db.query(CrawlConfig).all()
@@ -281,14 +284,11 @@ def register_jobs():
 
     count = 0
     for cfg in configs:
-        # 始终从 RAW 池取原函数（被包过的也支持）
         raw = _unwrap(JOB_REGISTRY.get(cfg.job_key))
         if raw is None:
             continue
-        if cfg.cron_type == "interval":
-            JOB_REGISTRY[cfg.job_key] = _wrap_with_window_guard(cfg, raw)
-        else:
-            JOB_REGISTRY[cfg.job_key] = raw
+        # 所有任务都包（trading_only 守卫对 daily 也生效；窗口仅 interval 检查）
+        JOB_REGISTRY[cfg.job_key] = _wrap_with_window_guard(cfg, raw)
         if _register_one(cfg):
             count += 1
     logger.info("已注册 %d 个调度任务", count)
@@ -309,11 +309,7 @@ def reload_job(job_key: str) -> bool:
     if raw is None:
         return False
 
-    if cfg.cron_type == "interval":
-        JOB_REGISTRY[job_key] = _wrap_with_window_guard(cfg, raw)
-    else:
-        JOB_REGISTRY[job_key] = raw
-
+    JOB_REGISTRY[job_key] = _wrap_with_window_guard(cfg, raw)
     return _register_one(cfg)
 
 

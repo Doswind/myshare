@@ -13,12 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 # 默认配置（首次启动写入）
+# 原则：没必要就不抓 → 所有任务默认 trading_only=True
 DEFAULTS: List[Dict[str, Any]] = [
     {
         "job_key": "funds_full",
         "display_name": "基金列表+持仓",
         "cron_type": "daily",
         "time_of_day": "20:30",
+        "trading_only": True,
         "enabled": True,
         "description": "全量抓基金列表 + 主力基金最新季报持仓，约 10-15 分钟",
     },
@@ -27,8 +29,9 @@ DEFAULTS: List[Dict[str, Any]] = [
         "display_name": "基金正式净值",
         "cron_type": "daily",
         "time_of_day": "20:35",
+        "trading_only": True,
         "enabled": True,
-        "description": "基金公司 20:00 后公布当日净值，覆盖估算值",
+        "description": "基金公司 20:00 后公布当日净值，覆盖估算值（节假日不抓）",
     },
     {
         "job_key": "quotes",
@@ -39,31 +42,34 @@ DEFAULTS: List[Dict[str, Any]] = [
         "window_end": "15:00",
         "trading_only": True,
         "enabled": True,
-        "description": "刷新 500+ 只持仓股行情（交易时段每 N 分钟）",
+        "description": "刷新 500+ 只持仓股行情（仅交易时段）",
     },
     {
         "job_key": "sectors",
         "display_name": "行业+成分股",
         "cron_type": "daily",
         "time_of_day": "21:00",
+        "trading_only": True,
         "enabled": True,
-        "description": "刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name",
+        "description": "刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name（交易日抓）",
     },
     {
         "job_key": "fund_details",
         "display_name": "基金详情(评级/经理)",
         "cron_type": "daily",
         "time_of_day": "22:00",
+        "trading_only": True,
         "enabled": True,
-        "description": "回填主力基金的风险等级 / 评级 / 经理 / 管理人",
+        "description": "回填主力基金的风险等级 / 评级 / 经理 / 管理人（评级/经理节假日变化极少，交易日抓即可）",
     },
     {
         "job_key": "stock_details",
         "display_name": "股票详情(行业)",
         "cron_type": "daily",
         "time_of_day": "22:30",
+        "trading_only": True,
         "enabled": True,
-        "description": "回填持仓股的 industry_name（emweb 单股接口）",
+        "description": "回填持仓股的 industry_name（行业名称稳定，交易日抓）",
     },
 ]
 
@@ -73,20 +79,33 @@ class CrawlConfigService:
 
     @staticmethod
     def seed_defaults() -> None:
-        """首次启动：写入默认配置（已存在则跳过）"""
+        """启动时同步默认配置：
+        - 缺失的任务 → 新增
+        - 已存在的任务 → 把 defaults 里的关键字段（trading_only/cron_type/time_of_day/...）回填
+          （不覆盖用户已改过的 enabled/自定义时间）
+        """
         db = SessionLocal()
         try:
-            existing = {r.job_key for r in db.query(CrawlConfig).all()}
+            existing = {r.job_key: r for r in db.query(CrawlConfig).all()}
             added = 0
+            updated = 0
             for d in DEFAULTS:
-                if d["job_key"] in existing:
-                    continue
-                row = CrawlConfig(**d)
-                db.add(row)
-                added += 1
-            if added:
+                key = d["job_key"]
+                if key not in existing:
+                    db.add(CrawlConfig(**d))
+                    added += 1
+                else:
+                    # 把 defaults 的关键字段同步到已存在行（处理历史 DB 升级）
+                    row = existing[key]
+                    for k in ("trading_only", "cron_type", "time_of_day",
+                              "interval_minutes", "window_start", "window_end",
+                              "display_name", "description"):
+                        if k in d and getattr(row, k) != d[k]:
+                            setattr(row, k, d[k])
+                            updated += 1
+            if added or updated:
                 db.commit()
-                logger.info("初始化抓取配置：新增 %d 条", added)
+                logger.info("同步抓取配置：新增 %d 条，更新 %d 个字段", added, updated)
         finally:
             db.close()
 

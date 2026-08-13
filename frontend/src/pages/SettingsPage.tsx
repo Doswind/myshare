@@ -376,6 +376,7 @@ function CrawlStrategySection({
           <tbody>
             {merged.map((c) => {
               const dirty = !!draft[c.job_key];
+              const showIntervalFields = c.cron_type === "interval";
               return (
                 <tr key={c.job_key} className={`border-t border-slate-100 ${dirty ? "bg-amber-50/50" : ""}`}>
                   {/* 开关 */}
@@ -440,9 +441,9 @@ function CrawlStrategySection({
                     )}
                     {c.cron_type === "off" && <span className="text-slate-300">--</span>}
                   </td>
-                  {/* 运行窗口 */}
+                  {/* 运行窗口：仅 interval 任务有效 */}
                   <td className="py-1.5 px-2">
-                    {c.cron_type === "interval" ? (
+                    {showIntervalFields ? (
                       <div className="flex items-center gap-1">
                         <input
                           type="time"
@@ -464,19 +465,16 @@ function CrawlStrategySection({
                       <span className="text-slate-300 text-[11px]">--</span>
                     )}
                   </td>
-                  {/* 仅交易日 */}
+                  {/* 仅交易日：所有任务都支持 */}
                   <td className="py-1.5 px-2">
-                    {c.cron_type === "interval" ? (
-                      <input
-                        type="checkbox"
-                        checked={c.trading_only}
-                        onChange={(e) => updateField(c.job_key, "trading_only", e.target.checked)}
-                        disabled={!c.enabled}
-                        className="w-3.5 h-3.5"
-                      />
-                    ) : (
-                      <span className="text-slate-300">--</span>
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={c.trading_only}
+                      onChange={(e) => updateField(c.job_key, "trading_only", e.target.checked)}
+                      disabled={!c.enabled}
+                      className="w-3.5 h-3.5"
+                      title="勾选：仅 A 股交易日抓取"
+                    />
                   </td>
                   {/* 说明 */}
                   <td className="py-1.5 px-2 text-[11px] text-slate-500 leading-tight">
