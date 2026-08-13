@@ -19,6 +19,8 @@ class Stock(Base):
     # 拼音相关字段：用于自选股的快速搜索
     pinyin_full = Column(String(120), comment="名称全拼（小写，无音调）")
     pinyin_abbr = Column(String(20), comment="名称首字母（小写）")
+    # 详情抓取时间：用于 TTL 缓存，避免对已抓过的股票重复远程请求
+    details_fetched_at = Column(DateTime, comment="详情(name/industry)最近一次远程抓取时间")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (

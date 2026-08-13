@@ -56,21 +56,13 @@ async def add_watchlist(
         item = WatchlistService.add_watchlist(db, user.id, resolved_code, resolved_name, body.note)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    # 异步补 industry（如果还没有）
+    # 异步补 industry（如果还没有）—— resolve_detail 内置 TTL+锁，多用户并发添加同一只股票只抓一次
     s_row = db.query(Stock).filter(Stock.code == resolved_code).first()
-    need_fetch = (s_row and not s_row.industry_name)
-    if need_fetch:
-        detail = await WatchlistService.resolve_detail(resolved_code)
+    if s_row and not s_row.industry_name:
+        detail = await WatchlistService.resolve_detail(db, resolved_code)
         if detail:
             if detail.get("industry"):
                 item["industry_name"] = detail["industry"]
-            if s_row and detail.get("industry"):
-                s_row.industry_name = detail["industry"]
-                if detail.get("market") is not None:
-                    s_row.market = detail["market"]
-                if detail.get("secid"):
-                    s_row.secid = detail["secid"]
-                db.commit()
     return item
 
 
