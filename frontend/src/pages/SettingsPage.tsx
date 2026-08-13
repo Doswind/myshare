@@ -219,7 +219,7 @@ export default function SettingsPage() {
                 <td className="py-1.5 text-slate-800">{j.name}</td>
                 <td className="py-1.5 text-slate-500">{j.trigger}</td>
                 <td className="py-1.5 tabular text-slate-700">
-                  {j.next_run ? new Date(j.next_run).toLocaleString("zh-CN") : "--"}
+                  {j.next_run ? formatBeijingTime(j.next_run) : "--"}
                 </td>
               </tr>
             ))}
@@ -384,12 +384,12 @@ export default function SettingsPage() {
               <tr><td colSpan={7} className="text-center text-slate-400 py-4">暂无日志</td></tr>
             )}
             {jobs.map((j) => {
-              const started = j.started_at ? new Date(j.started_at) : null;
-              const finished = j.finished_at ? new Date(j.finished_at) : null;
               const isRunning = j.status === "running";
               // 耗时：running = now - started；success/failed = finished - started
-              const durationSec = started
-                ? Math.max(0, Math.floor(((finished ?? new Date(Date.now() + tick * 0)).getTime() - started.getTime()) / 1000))
+              const startedMs = j.started_at ? new Date(j.started_at).getTime() : 0;
+              const finishedMs = j.finished_at ? new Date(j.finished_at).getTime() : 0;
+              const durationSec = startedMs
+                ? Math.max(0, Math.floor(((finishedMs || Date.now()) - startedMs) / 1000))
                 : 0;
               const isLongRunning = isRunning && durationSec > 600;  // >10 分钟亮红，提示卡住
               return (
@@ -416,21 +416,14 @@ export default function SettingsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 tabular text-slate-500">
-                    {started ? (
-                      <span>
-                        {started.toLocaleTimeString("zh-CN", { hour12: false })}
-                        <span className="text-slate-300 ml-1">
-                          {started.toLocaleDateString("zh-CN") === new Date().toLocaleDateString("zh-CN") ? "" : started.toLocaleDateString("zh-CN")}
-                        </span>
-                      </span>
-                    ) : "--"}
+                    {j.started_at ? formatBeijingTime(j.started_at) : "--"}
                   </td>
                   <td className={`px-3 py-1.5 text-right tabular ${isLongRunning ? "text-red-600 font-semibold" : "text-slate-700"}`}>
                     {formatDuration(durationSec)}
                     {isLongRunning && <span className="ml-1 text-[10px]">⚠ 卡住</span>}
                   </td>
                   <td className="px-3 py-1.5 tabular text-slate-500">
-                    {finished ? finished.toLocaleTimeString("zh-CN", { hour12: false }) : (
+                    {j.finished_at ? formatBeijingTime(j.finished_at, "time") : (
                       <span className="text-amber-600 text-[10px]">进行中…</span>
                     )}
                   </td>
@@ -507,6 +500,40 @@ function formatDuration(sec: number): string {
     return m > 0 ? `${h}h${m}m` : `${h}h`;
   }
   return formatRemain(sec);
+}
+
+/** 把 ISO 时间字符串强制按 Asia/Shanghai 时区格式化（避免依赖浏览器时区）
+
+  - mode = "datetime"（默认）：「YYYY/M/D HH:MM:SS」+ 当天只显示时分
+  - mode = "time"：只显示「HH:MM:SS」
+
+  后端存的 naive UTC 会被 to_dict 加 +00:00 后输出，所以
+  「2026-08-13T16:30:50+00:00」= 北京时间「2026-08-14 00:30:50」
+*/
+function formatBeijingTime(iso: string, mode: "datetime" | "time" = "datetime"): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--";
+  const dateStr = d.toLocaleDateString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  const timeStr = d.toLocaleTimeString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour12: false,
+  });
+  if (mode === "time") return timeStr;
+  // 当天不显示日期
+  const now = new Date();
+  const todayStr = now.toLocaleDateString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  if (dateStr === todayStr) return timeStr;
+  return `${dateStr} ${timeStr}`;
 }
 
 /** 手动抓取按钮：带繁忙/冷却/锁三态显示 */
