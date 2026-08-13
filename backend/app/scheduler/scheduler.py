@@ -251,14 +251,16 @@ def _register_one(cfg: CrawlConfig) -> bool:
 
 def _wrap_with_window_guard(cfg: CrawlConfig, fn: Callable) -> Callable:
     """给任务加守卫：
+    - trading_only_locked=True 的任务：强制 trading_only=True（防 DB 被改）
     - trading_only=True 且非交易日 → 跳过
     - interval 模式下，窗口外 → 跳过
     - daily 模式：每天都执行（窗口不适用）
     """
     win_s = _parse_hhmm(cfg.window_start)
     win_e = _parse_hhmm(cfg.window_end)
-    trading = bool(cfg.trading_only)
     is_interval = cfg.cron_type == "interval"
+    # locked 任务：无视 DB 字段，强制 True
+    trading = bool(cfg.trading_only) or bool(cfg.trading_only_locked)
 
     @wraps(fn)
     def wrapped():

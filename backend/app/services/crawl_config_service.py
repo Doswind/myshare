@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 # 默认配置（首次启动写入）
-# 原则：没必要就不抓 → 所有任务默认 trading_only=True
+# 原则：没必要就不抓 → 所有任务 trading_only=True + 强制锁定（用户不可改）
+LOCKED_REASON = "该任务在周末/节假日抓取无意义，已强制锁定（要改需修改代码）"
 DEFAULTS: List[Dict[str, Any]] = [
     {
         "job_key": "funds_full",
@@ -21,8 +22,9 @@ DEFAULTS: List[Dict[str, Any]] = [
         "cron_type": "daily",
         "time_of_day": "20:30",
         "trading_only": True,
+        "trading_only_locked": True,
         "enabled": True,
-        "description": "全量抓基金列表 + 主力基金最新季报持仓，约 10-15 分钟",
+        "description": f"全量抓基金列表 + 主力基金最新季报持仓，约 10-15 分钟。{LOCKED_REASON}",
     },
     {
         "job_key": "fund_nav",
@@ -30,8 +32,9 @@ DEFAULTS: List[Dict[str, Any]] = [
         "cron_type": "daily",
         "time_of_day": "20:35",
         "trading_only": True,
+        "trading_only_locked": True,
         "enabled": True,
-        "description": "基金公司 20:00 后公布当日净值，覆盖估算值（节假日不抓）",
+        "description": f"基金公司 20:00 后公布当日净值，覆盖估算值。{LOCKED_REASON}",
     },
     {
         "job_key": "quotes",
@@ -41,8 +44,9 @@ DEFAULTS: List[Dict[str, Any]] = [
         "window_start": "09:30",
         "window_end": "15:00",
         "trading_only": True,
+        "trading_only_locked": True,
         "enabled": True,
-        "description": "刷新 500+ 只持仓股行情（仅交易时段）",
+        "description": f"刷新 500+ 只持仓股行情（仅交易时段）。{LOCKED_REASON}",
     },
     {
         "job_key": "sectors",
@@ -50,8 +54,9 @@ DEFAULTS: List[Dict[str, Any]] = [
         "cron_type": "daily",
         "time_of_day": "21:00",
         "trading_only": True,
+        "trading_only_locked": True,
         "enabled": True,
-        "description": "刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name（交易日抓）",
+        "description": f"刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name。{LOCKED_REASON}",
     },
     {
         "job_key": "fund_details",
@@ -59,8 +64,9 @@ DEFAULTS: List[Dict[str, Any]] = [
         "cron_type": "daily",
         "time_of_day": "22:00",
         "trading_only": True,
+        "trading_only_locked": True,
         "enabled": True,
-        "description": "回填主力基金的风险等级 / 评级 / 经理 / 管理人（评级/经理节假日变化极少，交易日抓即可）",
+        "description": f"回填主力基金的风险等级 / 评级 / 经理 / 管理人（评级/经理节假日变化极少）。{LOCKED_REASON}",
     },
     {
         "job_key": "stock_details",
@@ -68,10 +74,18 @@ DEFAULTS: List[Dict[str, Any]] = [
         "cron_type": "daily",
         "time_of_day": "22:30",
         "trading_only": True,
+        "trading_only_locked": True,
         "enabled": True,
-        "description": "回填持仓股的 industry_name（行业名称稳定，交易日抓）",
+        "description": f"回填持仓股的 industry_name（行业名称稳定，节假日不变）。{LOCKED_REASON}",
     },
 ]
+
+
+# 用户可编辑的字段（locked 字段不允许通过 API 改）
+EDITABLE_FIELDS = {
+    "display_name", "cron_type", "interval_minutes", "time_of_day",
+    "window_start", "window_end", "trading_only", "enabled", "description",
+}
 
 
 class CrawlConfigService:
@@ -97,7 +111,7 @@ class CrawlConfigService:
                 else:
                     # 把 defaults 的关键字段同步到已存在行（处理历史 DB 升级）
                     row = existing[key]
-                    for k in ("trading_only", "cron_type", "time_of_day",
+                    for k in ("trading_only", "trading_only_locked", "cron_type", "time_of_day",
                               "interval_minutes", "window_start", "window_end",
                               "display_name", "description"):
                         if k in d and getattr(row, k) != d[k]:
@@ -129,11 +143,7 @@ class CrawlConfigService:
 
     @staticmethod
     def update(job_key: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-        """部分更新（白名单字段）"""
-        allowed = {
-            "display_name", "cron_type", "interval_minutes", "time_of_day",
-            "window_start", "window_end", "trading_only", "enabled", "description",
-        }
+        """部分更新（白名单字段；locked 任务的 trading_only 拒绝改）"""
         db = SessionLocal()
         try:
             row = db.query(CrawlConfig).filter(CrawlConfig.job_key == job_key).first()
@@ -146,8 +156,14 @@ class CrawlConfigService:
                 db.add(row)
                 db.commit()
                 db.refresh(row)
+            # 拒绝改 trading_only_locked 字段
+            if "trading_only_locked" in updates:
+                updates = {k: v for k, v in updates.items() if k != "trading_only_locked"}
+            # locked 任务：拒绝把 trading_only 改 False
+            if row.trading_only_locked and "trading_only" in updates and not updates["trading_only"]:
+                raise ValueError(f"任务 {job_key} 已强制锁定仅交易日抓取，不可改为非交易日抓取")
             for k, v in updates.items():
-                if k in allowed:
+                if k in EDITABLE_FIELDS:
                     setattr(row, k, v)
             db.commit()
             db.refresh(row)

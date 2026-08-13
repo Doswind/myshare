@@ -134,6 +134,7 @@ export interface CrawlConfig {
   window_start: string;       // HH:MM
   window_end: string;         // HH:MM
   trading_only: boolean;
+  trading_only_locked: boolean;
   enabled: boolean;
   description: string;
   updated_at?: string;

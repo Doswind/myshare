@@ -25,6 +25,8 @@ class CrawlConfig(Base):
     window_end = Column(String(5), default="", comment="interval 窗口终点 HH:MM")
     # 是否仅 A 股交易日执行（interval 用得多）
     trading_only = Column(Boolean, default=False, comment="interval 时是否仅交易日执行")
+    # 强制锁定：True=系统强制 trading_only=True，用户不能改（防误操作）
+    trading_only_locked = Column(Boolean, default=False, comment="True=强制锁定 trading_only=true，用户不可修改")
     enabled = Column(Boolean, default=True, comment="总开关")
     description = Column(Text, default="", comment="说明文字（设置页展示）")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -39,6 +41,7 @@ class CrawlConfig(Base):
             "window_start": self.window_start or "",
             "window_end": self.window_end or "",
             "trading_only": bool(self.trading_only),
+            "trading_only_locked": bool(self.trading_only_locked),
             "enabled": bool(self.enabled),
             "description": self.description or "",
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

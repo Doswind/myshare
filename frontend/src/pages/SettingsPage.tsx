@@ -14,7 +14,7 @@ import {
   resetCrawlConfigs,
 } from "@/api/crawlConfig";
 import type { CrawlConfig } from "@/types/api";
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw } from "lucide-react";
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock } from "lucide-react";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -325,6 +325,10 @@ function CrawlStrategySection({
   const updateField = <K extends keyof CrawlConfig>(key: string, field: K, value: CrawlConfig[K]) => {
     setDraft((prev) => {
       const base = prev[key] || configs.find((c) => c.job_key === key)!;
+      // locked 任务的 trading_only 不允许改
+      if (field === "trading_only" && base.trading_only_locked) {
+        return prev;  // 忽略
+      }
       return { ...prev, [key]: { ...base, [field]: value } };
     });
   };
@@ -465,16 +469,25 @@ function CrawlStrategySection({
                       <span className="text-slate-300 text-[11px]">--</span>
                     )}
                   </td>
-                  {/* 仅交易日：所有任务都支持 */}
+                  {/* 仅交易日：locked 任务显示🔒，不可改 */}
                   <td className="py-1.5 px-2">
-                    <input
-                      type="checkbox"
-                      checked={c.trading_only}
-                      onChange={(e) => updateField(c.job_key, "trading_only", e.target.checked)}
-                      disabled={!c.enabled}
-                      className="w-3.5 h-3.5"
-                      title="勾选：仅 A 股交易日抓取"
-                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={c.trading_only}
+                        disabled={c.trading_only_locked || !c.enabled}
+                        onChange={(e) => updateField(c.job_key, "trading_only", e.target.checked)}
+                        className="w-3.5 h-3.5 disabled:cursor-not-allowed"
+                        title={
+                          c.trading_only_locked
+                            ? "已强制锁定：周末/节假日抓取无意义，不可修改"
+                            : "勾选：仅 A 股交易日抓取"
+                        }
+                      />
+                      {c.trading_only_locked && (
+                        <Lock className="w-3 h-3 text-slate-400" />
+                      )}
+                    </div>
                   </td>
                   {/* 说明 */}
                   <td className="py-1.5 px-2 text-[11px] text-slate-500 leading-tight">
