@@ -8,11 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from app.deps import get_db
+from app.deps import get_db, get_current_user, require_admin
 from app.models.job_log import JobLog
 from app.services.fund_service import FundService
 from app.services.stock_service import StockService
 from app.scheduler.scheduler import scheduler
+from app.models.rbac import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

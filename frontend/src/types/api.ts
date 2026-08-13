@@ -16,8 +16,11 @@ export interface Fund {
   ret_5y?: number;
   ret_this_year?: number;
   inception_date?: string;
+  inception_return?: number;
   manager?: string;
   company?: string;
+  risk_level?: string;
+  rating?: number;
   is_main?: boolean;
   updated_at?: string;
 }

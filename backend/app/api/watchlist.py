@@ -4,10 +4,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.deps import get_db
+from app.deps import get_db, get_current_user
 from app.services.watchlist_service import WatchlistService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 class AddBody(BaseModel):

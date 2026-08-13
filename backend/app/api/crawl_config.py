@@ -1,11 +1,12 @@
 """抓取策略配置 API"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any
 
+from app.deps import get_current_user
 from app.services.crawl_config_service import CrawlConfigService
 from app.scheduler.scheduler import reload_job, reload_all
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("")

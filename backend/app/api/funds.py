@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.deps import get_db
+from app.deps import get_db, get_current_user
 from app.services.fund_service import FundService
+from app.models.rbac import User
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("")

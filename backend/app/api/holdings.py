@@ -3,10 +3,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
-from app.deps import get_db
+from app.deps import get_db, get_current_user
 from app.services.aggregation import AggregationService, BOARD_PREFIXES
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 VALID_BOARDS = sorted(BOARD_PREFIXES.keys())
 

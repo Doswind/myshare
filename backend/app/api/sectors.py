@@ -3,11 +3,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List
 
-from app.deps import get_db
+from app.deps import get_db, get_current_user
 from app.models.sector import Sector, SectorMember
 from app.models.stock import Stock
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("")

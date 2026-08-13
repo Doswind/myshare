@@ -1,10 +1,11 @@
 """筛选默认值 API"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import Dict, Any
 
+from app.deps import get_current_user
 from app.services.filter_service import FilterService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/defaults")
