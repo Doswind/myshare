@@ -111,6 +111,7 @@ export default function UsersAdminPage() {
                   <td className="px-3 py-2 font-medium text-slate-800">
                     {u.username}
                     {u.is_admin && <span className="ml-1 text-[10px] text-blue-600">(admin)</span>}
+                    {isSelf && <span className="ml-1 text-[10px] text-emerald-600">(你)</span>}
                   </td>
                   <td className="px-3 py-2 text-slate-600">{u.email}</td>
                   <td className="px-3 py-2">
@@ -137,15 +138,17 @@ export default function UsersAdminPage() {
                   <td className="px-3 py-2 text-right space-x-1 whitespace-nowrap">
                     <button
                       onClick={() => setEditingUser(u)}
-                      className="text-blue-600 hover:underline text-[11px]"
-                      title="编辑角色 / 邮箱"
+                      disabled={isSelf}
+                      className="text-blue-600 hover:underline text-[11px] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:no-underline"
+                      title={isSelf ? "请到个人中心修改自己的信息" : "编辑角色 / 邮箱"}
                     >
                       编辑
                     </button>
                     <button
                       onClick={() => setResettingUser(u)}
-                      className="text-amber-600 hover:underline text-[11px]"
-                      title="重置密码"
+                      disabled={isSelf}
+                      className="text-amber-600 hover:underline text-[11px] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:no-underline"
+                      title={isSelf ? "请到个人中心修改自己的密码" : "重置密码"}
                     >
                       重置密码
                     </button>
