@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usersApi, rolesApi, type UserInfo, type Role } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, Trash2, KeyRound, ToggleLeft, ToggleRight, X } from "lucide-react";
+import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
+import { Plus, Trash2, X } from "lucide-react";
 
 export default function UsersAdminPage() {
   const qc = useQueryClient();
@@ -13,6 +14,7 @@ export default function UsersAdminPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingUser, setEditingUser] = useState<UserInfo | null>(null);
   const [resettingUser, setResettingUser] = useState<UserInfo | null>(null);
+  const [confirm, setConfirm] = useState<(ConfirmOptions & { onOk: () => void }) | null>(null);
 
   const del = useMutation({
     mutationFn: (id: number) => usersApi.remove(id),
@@ -34,6 +36,45 @@ export default function UsersAdminPage() {
   const showToast = (type: "ok" | "err", msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // 触发切换启用的确认弹窗
+  const askToggle = (u: UserInfo) => {
+    if (u.id === currentUser?.id) {
+      showToast("err", "不能禁用自己的账号");
+      return;
+    }
+    const willEnable = !u.is_active;
+    setConfirm({
+      title: willEnable ? `启用用户「${u.username}」` : `禁用用户「${u.username}」`,
+      description: willEnable
+        ? "启用后该用户将可以正常登录系统。"
+        : "禁用后该用户将无法登录，所有会话会失效。",
+      confirmText: willEnable ? "启用" : "禁用",
+      variant: willEnable ? "info" : "warning",
+      onOk: () => {
+        toggleActive.mutate({ id: u.id, is_active: willEnable });
+        setConfirm(null);
+      },
+    });
+  };
+
+  // 触发删除的确认弹窗
+  const askDelete = (u: UserInfo) => {
+    if (u.id === currentUser?.id) {
+      showToast("err", "不能删除自己的账号");
+      return;
+    }
+    setConfirm({
+      title: `删除用户「${u.username}」`,
+      description: "此操作不可恢复。用户的所有数据（自选股、登录记录等）将一并清除。",
+      confirmText: "删除",
+      variant: "danger",
+      onOk: () => {
+        del.mutate(u.id);
+        setConfirm(null);
+      },
+    });
   };
 
   return (
@@ -62,105 +103,64 @@ export default function UsersAdminPage() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50/50">
-                <td className="px-3 py-2 text-slate-500">{u.id}</td>
-                <td className="px-3 py-2 font-medium text-slate-800">
-                  {u.username}
-                  {u.is_admin && <span className="ml-1 text-[10px] text-blue-600">(admin)</span>}
-                </td>
-                <td className="px-3 py-2 text-slate-600">{u.email}</td>
-                <td className="px-3 py-2">
-                  {u.roles.map((r) => (
-                    <span
-                      key={r.id}
-                      className="inline-block rounded bg-slate-100 text-slate-700 text-[10px] px-1.5 py-0.5 mr-1"
+            {users.map((u) => {
+              const isSelf = u.id === currentUser?.id;
+              return (
+                <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                  <td className="px-3 py-2 text-slate-500">{u.id}</td>
+                  <td className="px-3 py-2 font-medium text-slate-800">
+                    {u.username}
+                    {u.is_admin && <span className="ml-1 text-[10px] text-blue-600">(admin)</span>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">{u.email}</td>
+                  <td className="px-3 py-2">
+                    {u.roles.map((r) => (
+                      <span
+                        key={r.id}
+                        className="inline-block rounded bg-slate-100 text-slate-700 text-[10px] px-1.5 py-0.5 mr-1"
+                      >
+                        {r.name}
+                      </span>
+                    ))}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Switch
+                      checked={u.is_active}
+                      disabled={isSelf || toggleActive.isPending}
+                      onChange={() => askToggle(u)}
+                      label={u.is_active ? "启用" : "禁用"}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-slate-400 text-[11px]">
+                    {u.last_login_at ? new Date(u.last_login_at).toLocaleString("zh-CN", { hour12: false }) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right space-x-1 whitespace-nowrap">
+                    <button
+                      onClick={() => setEditingUser(u)}
+                      className="text-blue-600 hover:underline text-[11px]"
+                      title="编辑角色 / 邮箱"
                     >
-                      {r.name}
-                    </span>
-                  ))}
-                </td>
-                <td className="px-3 py-2">
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      u.is_active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-500"
-                    }`}
-                  >
-                    {u.is_active ? "启用" : "禁用"}
-                  </span>
-                  {u.must_change_password && (
-                    <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-                      强制改密
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-slate-400 text-[11px]">
-                  {u.last_login_at ? new Date(u.last_login_at).toLocaleString("zh-CN", { hour12: false }) : "—"}
-                </td>
-                <td className="px-3 py-2 text-right space-x-1 whitespace-nowrap">
-                  <button
-                    onClick={() => {
-                      const action = u.is_active ? "禁用" : "启用";
-                      if (u.id === currentUser?.id) {
-                        showToast("err", "不能禁用自己的账号");
-                        return;
-                      }
-                      if (
-                        !confirm(
-                          `确定要${action}用户「${u.username}」吗？${
-                            !u.is_active ? "" : "\n禁用后该用户将无法登录。"
-                          }`
-                        )
-                      )
-                        return;
-                      toggleActive.mutate({ id: u.id, is_active: !u.is_active });
-                    }}
-                    disabled={toggleActive.isPending}
-                    className={`inline-flex items-center gap-0.5 text-[11px] hover:underline disabled:opacity-50 ${
-                      u.is_active ? "text-slate-500" : "text-emerald-600"
-                    }`}
-                    title={u.id === currentUser?.id ? "不能禁用自己的账号" : u.is_active ? "禁用此用户" : "启用此用户"}
-                  >
-                    {u.is_active ? (
-                      <>
-                        <ToggleRight className="w-3.5 h-3.5" /> 禁用
-                      </>
-                    ) : (
-                      <>
-                        <ToggleLeft className="w-3.5 h-3.5" /> 启用
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setEditingUser(u)}
-                    className="text-blue-600 hover:underline text-[11px]"
-                    title="编辑角色 / 邮箱"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    onClick={() => setResettingUser(u)}
-                    className="text-amber-600 hover:underline text-[11px]"
-                    title="重置密码"
-                  >
-                    重置密码
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (u.id === currentUser?.id) {
-                        showToast("err", "不能删除自己的账号");
-                        return;
-                      }
-                      if (confirm(`确定删除用户 ${u.username} 吗？`)) del.mutate(u.id);
-                    }}
-                    className="text-red-600 hover:underline text-[11px]"
-                    title={u.id === currentUser?.id ? "不能删除自己" : "删除用户"}
-                  >
-                    <Trash2 className="w-3 h-3 inline" />
-                  </button>
-                </td>
-              </tr>
-            ))}
+                      编辑
+                    </button>
+                    <button
+                      onClick={() => setResettingUser(u)}
+                      className="text-amber-600 hover:underline text-[11px]"
+                      title="重置密码"
+                    >
+                      重置密码
+                    </button>
+                    <button
+                      onClick={() => askDelete(u)}
+                      disabled={isSelf}
+                      className="text-red-600 hover:underline text-[11px] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:no-underline"
+                      title={isSelf ? "不能删除自己" : "删除用户"}
+                    >
+                      <Trash2 className="w-3 h-3 inline" />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
             {users.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center py-6 text-slate-400 text-[12px]">
@@ -201,6 +201,19 @@ export default function UsersAdminPage() {
         />
       )}
 
+      {confirm && (
+        <ConfirmDialog
+          open
+          title={confirm.title}
+          description={confirm.description}
+          confirmText={confirm.confirmText}
+          cancelText={confirm.cancelText}
+          variant={confirm.variant}
+          onConfirm={confirm.onOk}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
       {toast && (
         <div
           className={`fixed bottom-4 right-4 z-50 px-3 py-2 rounded shadow text-[12px] ${
@@ -211,6 +224,38 @@ export default function UsersAdminPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// iOS 风开关（绿色=启用，灰=禁用）
+function Switch({
+  checked,
+  disabled,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onChange}
+      title={label}
+      className={`relative inline-flex items-center h-[18px] w-8 rounded-full transition-colors duration-200
+        ${checked ? "bg-emerald-500" : "bg-slate-300"}
+        ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer hover:brightness-110"}`}
+    >
+      <span
+        className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-200
+          ${checked ? "translate-x-[14px]" : "translate-x-0"}`}
+      />
+    </button>
   );
 }
 

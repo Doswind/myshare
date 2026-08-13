@@ -15,6 +15,7 @@ import {
 } from "@/api/crawlConfig";
 import type { CrawlConfig } from "@/types/api";
 import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock } from "lucide-react";
+import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -36,6 +37,7 @@ export default function SettingsPage() {
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  const [confirmState, setConfirmState] = useState<(ConfirmOptions & { onOk: () => void }) | null>(null);
   const [draftConfigs, setDraftConfigs] = useState<Record<string, CrawlConfig>>({});
   const [saving, setSaving] = useState(false);
 
@@ -148,16 +150,24 @@ export default function SettingsPage() {
           }
         }}
         onReset={async () => {
-          if (!confirm("确定要重置所有抓取配置为默认值吗？")) return;
-          try {
-            await resetCrawlConfigs();
-            qc.invalidateQueries({ queryKey: ["crawl-configs"] });
-            qc.invalidateQueries({ queryKey: ["scheduled-jobs"] });
-            setDraftConfigs({});
-            showToast("ok", "已重置为默认配置");
-          } catch (e: any) {
-            showToast("err", `重置失败：${formatErr(e)}`);
-          }
+          setConfirmState({
+            title: "重置所有抓取配置",
+            description: "确定要重置所有抓取任务为默认配置吗？\n此操作不可撤销。",
+            confirmText: "重置",
+            variant: "warning",
+            onOk: async () => {
+              setConfirmState(null);
+              try {
+                await resetCrawlConfigs();
+                qc.invalidateQueries({ queryKey: ["crawl-configs"] });
+                qc.invalidateQueries({ queryKey: ["scheduled-jobs"] });
+                setDraftConfigs({});
+                showToast("ok", "已重置为默认配置");
+              } catch (e: any) {
+                showToast("err", `重置失败：${formatErr(e)}`);
+              }
+            },
+          });
         }}
       />
 
@@ -281,6 +291,19 @@ export default function SettingsPage() {
         >
           {toast.msg}
         </div>
+      )}
+
+      {confirmState && (
+        <ConfirmDialog
+          open
+          title={confirmState.title}
+          description={confirmState.description}
+          confirmText={confirmState.confirmText}
+          cancelText={confirmState.cancelText}
+          variant={confirmState.variant}
+          onConfirm={confirmState.onOk}
+          onCancel={() => setConfirmState(null)}
+        />
       )}
     </div>
   );

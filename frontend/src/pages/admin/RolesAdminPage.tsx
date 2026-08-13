@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { rolesApi, permissionsApi, type Role, type Permission } from "@/api/auth";
+import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
 import { Plus, X, Lock } from "lucide-react";
 
 export default function RolesAdminPage() {
@@ -10,11 +11,25 @@ export default function RolesAdminPage() {
   const { data: permMap = {} } = useQuery({ queryKey: ["admin-perms"], queryFn: () => permissionsApi.list() });
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Role | null>(null);
+  const [confirmState, setConfirmState] = useState<(ConfirmOptions & { onOk: () => void }) | null>(null);
 
   const del = useMutation({
     mutationFn: (id: number) => rolesApi.remove(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-roles"] }),
   });
+
+  const askDelete = (r: Role) => {
+    setConfirmState({
+      title: `删除角色「${r.name}」`,
+      description: "此操作不可恢复。已分配此角色的用户将失去对应权限。",
+      confirmText: "删除",
+      variant: "danger",
+      onOk: () => {
+        del.mutate(r.id);
+        setConfirmState(null);
+      },
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -115,9 +130,7 @@ export default function RolesAdminPage() {
                   </button>
                   {!r.is_builtin && (
                     <button
-                      onClick={() => {
-                        if (confirm(`确定删除角色 ${r.name} 吗？`)) del.mutate(r.id);
-                      }}
+                      onClick={() => askDelete(r)}
                       className="text-red-600 hover:underline text-[11px]"
                     >
                       删除
@@ -149,6 +162,19 @@ export default function RolesAdminPage() {
             setEditing(null);
             qc.invalidateQueries({ queryKey: ["admin-roles"] });
           }}
+        />
+      )}
+
+      {confirmState && (
+        <ConfirmDialog
+          open
+          title={confirmState.title}
+          description={confirmState.description}
+          confirmText={confirmState.confirmText}
+          cancelText={confirmState.cancelText}
+          variant={confirmState.variant}
+          onConfirm={confirmState.onOk}
+          onCancel={() => setConfirmState(null)}
         />
       )}
     </div>

@@ -7,6 +7,7 @@ import {
   removeWatchlist,
   type StockSearchHit,
 } from "@/api/watchlist";
+import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
 import clsx from "clsx";
 
 interface Props {
@@ -215,25 +216,50 @@ export function WatchlistAddBox({ existingCodes = [], onAdded, className }: Prop
 export function WatchlistRemoveButton({ code, name }: { code: string; name: string }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
-  const onClick = async (e: React.MouseEvent) => {
+  const [confirmState, setConfirmState] = useState<(ConfirmOptions & { onOk: () => void }) | null>(null);
+
+  const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (busy) return;
-    if (!confirm(`确定从自选移除 ${name || code}？`)) return;
-    setBusy(true);
-    try {
-      await removeWatchlist(code);
-      qc.invalidateQueries({ queryKey: ["watchlist"] });
-    } finally {
-      setBusy(false);
-    }
+    setConfirmState({
+      title: "移除自选",
+      description: `确定从自选移除「${name || code}」吗？`,
+      confirmText: "移除",
+      variant: "warning",
+      onOk: async () => {
+        setConfirmState(null);
+        setBusy(true);
+        try {
+          await removeWatchlist(code);
+          qc.invalidateQueries({ queryKey: ["watchlist"] });
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   };
+
   return (
-    <button
-      onClick={onClick}
-      className="text-slate-300 hover:text-red-500 transition-colors text-[11px]"
-      title="移除自选"
-    >
-      {busy ? "..." : "✕"}
-    </button>
+    <>
+      <button
+        onClick={onClick}
+        className="text-slate-300 hover:text-red-500 transition-colors text-[11px]"
+        title="移除自选"
+      >
+        {busy ? "..." : "✕"}
+      </button>
+      {confirmState && (
+        <ConfirmDialog
+          open
+          title={confirmState.title}
+          description={confirmState.description}
+          confirmText={confirmState.confirmText}
+          cancelText={confirmState.cancelText}
+          variant={confirmState.variant}
+          onConfirm={confirmState.onOk}
+          onCancel={() => setConfirmState(null)}
+        />
+      )}
+    </>
   );
 }
