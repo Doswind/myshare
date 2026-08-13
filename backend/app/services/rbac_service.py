@@ -227,13 +227,25 @@ class UserService:
         return user
 
     @staticmethod
-    def update_profile(db: Session, user: User, display_name: str, phone: str, avatar: str) -> User:
-        """用户自己更新基础信息"""
+    def update_profile(
+        db: Session,
+        user: User,
+        display_name: str,
+        phone: str,
+        avatar: str,
+        email: Optional[str] = None,
+    ) -> User:
+        """用户自己更新基础信息（含邮箱）"""
         if not user.profile:
             user.profile = UserProfile()
         user.profile.display_name = display_name
         user.profile.phone = phone
         user.profile.avatar = avatar
+        if email and email != user.email:
+            # 检查邮箱是否被其他用户占用
+            if db.query(User).filter(User.email == email, User.id != user.id).first():
+                raise HTTPException(status_code=400, detail="邮箱已被其他用户使用")
+            user.email = email
         db.commit()
         db.refresh(user)
         return user

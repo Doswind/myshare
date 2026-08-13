@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutGrid, ListChecks, Settings, BarChart3, Activity, LogOut, User, ShieldCheck, Users, KeyRound } from "lucide-react";
+import { LayoutGrid, ListChecks, BarChart3, LogOut, User, ShieldCheck, Users, KeyRound, Settings, Activity } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import clsx from "clsx";
 import { useAuth } from "@/contexts/AuthContext";
@@ -28,7 +28,6 @@ export function AppShell() {
     { path: "/", label: "持仓看板", icon: LayoutGrid, perm: "dashboard:view" as const },
     { path: "/funds", label: "基金列表", icon: ListChecks, perm: "funds:view" as const },
     { path: "/stocks", label: "股票列表", icon: BarChart3, perm: "stocks:view" as const },
-    { path: "/settings", label: "抓取策略", icon: Settings, perm: "settings:view" as const },
   ];
 
   return (
@@ -96,6 +95,15 @@ export function AppShell() {
                   >
                     <User className="w-3 h-3" /> 个人中心
                   </Link>
+                  {hasPermission("settings:view") && (
+                    <Link
+                      to="/settings"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+                    >
+                      <Settings className="w-3 h-3" /> 抓取策略
+                    </Link>
+                  )}
                   {hasPermission("users:view") && (
                     <Link
                       to="/admin/users"

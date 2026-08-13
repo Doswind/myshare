@@ -67,12 +67,17 @@ client.interceptors.response.use(
         });
       }
     }
+    const detail = err.response?.data?.detail;
     const msg =
-      err.response?.data?.detail ||
-      err.response?.data?.message ||
-      err.message ||
-      "请求失败";
-    return Promise.reject(new Error(typeof msg === "string" ? msg : JSON.stringify(msg)));
+      typeof detail === "string"
+        ? detail
+        : detail
+        ? JSON.stringify(detail)
+        : err.response?.data?.message || err.message || "请求失败";
+    // 保留原 error 的 response 字段，方便上层 formatErr 解析 422 detail
+    const wrapped: any = new Error(typeof msg === "string" ? msg : String(msg));
+    wrapped.response = err.response;
+    return Promise.reject(wrapped);
   }
 );
 

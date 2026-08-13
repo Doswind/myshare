@@ -2,7 +2,7 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { authApi } from "@/api/auth";
-import { User, Phone, Camera, Save, KeyRound, AlertCircle, CheckCircle2 } from "lucide-react";
+import { User, Phone, Camera, Save, KeyRound, AlertCircle, CheckCircle2, Mail } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, updateUser, logout } = useAuth();
@@ -11,6 +11,7 @@ export default function ProfilePage() {
   const [displayName, setDisplayName] = useState(user.profile?.display_name || "");
   const [phone, setPhone] = useState(user.profile?.phone || "");
   const [avatar, setAvatar] = useState(user.profile?.avatar || "");
+  const [email, setEmail] = useState(user.email || "");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -25,11 +26,16 @@ export default function ProfilePage() {
     setProfileMsg(null);
     setSavingProfile(true);
     try {
-      const u = await authApi.updateProfile({ display_name: displayName, phone, avatar });
+      const u = await authApi.updateProfile({
+        display_name: displayName,
+        phone,
+        avatar,
+        email: email !== user.email ? email : undefined,
+      });
       updateUser(u);
       setProfileMsg({ type: "ok", text: "已保存" });
     } catch (e: unknown) {
-      setProfileMsg({ type: "err", text: (e as Error).message || "保存失败" });
+      setProfileMsg({ type: "err", text: formatErr(e) });
     } finally {
       setSavingProfile(false);
     }
@@ -46,7 +52,7 @@ export default function ProfilePage() {
       setPwMsg({ type: "ok", text: "密码已修改，请重新登录" });
       setTimeout(() => logout(), 1500);
     } catch (e: unknown) {
-      setPwMsg({ type: "err", text: (e as Error).message || "修改失败" });
+      setPwMsg({ type: "err", text: formatErr(e) });
     } finally {
       setSavingPw(false);
     }
@@ -74,6 +80,7 @@ export default function ProfilePage() {
 
         <Field icon={<User className="w-3.5 h-3.5" />} label="显示名" value={displayName} onChange={setDisplayName} />
         <Field icon={<Phone className="w-3.5 h-3.5" />} label="手机号" value={phone} onChange={setPhone} />
+        <Field icon={<Mail className="w-3.5 h-3.5" />} label="邮箱" type="email" value={email} onChange={setEmail} />
         <Field icon={<Camera className="w-3.5 h-3.5" />} label="头像 URL" value={avatar} onChange={setAvatar} />
 
         {profileMsg && <Msg type={profileMsg.type} text={profileMsg.text} />}
@@ -118,11 +125,13 @@ function Field({
   label,
   value,
   onChange,
+  type = "text",
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   onChange: (v: string) => void;
+  type?: string;
 }) {
   return (
     <label className="block">
@@ -130,7 +139,7 @@ function Field({
       <div className="relative">
         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">{icon}</span>
         <input
-          type="text"
+          type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full rounded border border-slate-300 pl-7 pr-2.5 py-1.5 text-[13px] focus:border-blue-500 focus:outline-none"
@@ -165,4 +174,22 @@ function Msg({ type, text }: { type: "ok" | "err"; text: string }) {
       {text}
     </div>
   );
+}
+
+function formatErr(e: unknown): string {
+  if (!e) return "未知错误";
+  if (typeof e === "string") return e;
+  const a = e as any;
+  if (a.response?.data?.detail) {
+    const d = a.response.data.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d) && d.length) {
+      const first = d[0];
+      const field = (first.loc?.filter((x: any) => x !== "body") || []).join(".") || "字段";
+      return `${field}：${first.msg || "格式不正确"}`;
+    }
+    return JSON.stringify(d);
+  }
+  if (a.message) return a.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
 }

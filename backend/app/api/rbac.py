@@ -51,6 +51,7 @@ class ProfileUpdateReq(BaseModel):
     display_name: str = ""
     phone: str = ""
     avatar: str = ""
+    email: Optional[EmailStr] = None
 
 class UserCreateReq(BaseModel):
     username: str = Field(min_length=3, max_length=40)
@@ -174,7 +175,7 @@ def update_me(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    UserService.update_profile(db, user, req.display_name, req.phone, req.avatar)
+    UserService.update_profile(db, user, req.display_name, req.phone, req.avatar, req.email)
     return user.to_dict()
 
 

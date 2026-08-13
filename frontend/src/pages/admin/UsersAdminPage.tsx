@@ -158,12 +158,17 @@ function CreateUserModal({ roles, onClose, onCreated }: { roles: Role[]; onClose
 
   const submit = async () => {
     setErr(null);
+    // 前端先校验邮箱格式，避免无效请求
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setErr("邮箱格式不正确，请输入有效的邮箱地址");
+      return;
+    }
     setSaving(true);
     try {
       await usersApi.create({ username, email, password, is_admin: isAdmin, role_ids: roleIds });
       onCreated();
     } catch (e: unknown) {
-      setErr((e as Error).message);
+      setErr(formatErr(e));
     } finally {
       setSaving(false);
     }
@@ -229,7 +234,7 @@ function EditUserModal({ user, roles, onClose, onSaved }: { user: UserInfo; role
       await usersApi.update(user.id, { is_active: isActive, role_ids: roleIds });
       onSaved();
     } catch (e: unknown) {
-      setErr((e as Error).message);
+      setErr(formatErr(e));
     } finally {
       setSaving(false);
     }
@@ -295,7 +300,7 @@ function ResetPwModal({ user, onClose, onReset }: { user: UserInfo; onClose: () 
       const r = await usersApi.resetPassword(user.id, newPw);
       setResult(r.new_password);
     } catch (e: unknown) {
-      setErr((e as Error).message);
+      setErr(formatErr(e));
     } finally {
       setSaving(false);
     }
@@ -379,4 +384,39 @@ function Input({
       />
     </label>
   );
+}
+
+// 把后端 422/400 detail（可能是字符串、对象或数组）解析为可读消息
+function formatErr(e: unknown): string {
+  if (!e) return "未知错误";
+  if (typeof e === "string") return e;
+  const a = e as any;
+  // 优先取 axios response 的 detail
+  const detail = a.response?.data?.detail ?? a.detail;
+  if (detail) {
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0];
+      // 优先按字段名做中文映射
+      const fieldMap: Record<string, string> = {
+        email: "邮箱",
+        username: "用户名",
+        password: "密码",
+        role_ids: "角色",
+        is_active: "状态",
+      };
+      const rawField = first.loc?.filter((x: any) => x !== "body").pop() || "字段";
+      const fieldName = fieldMap[rawField] || rawField;
+      const msg = first.msg || "格式不正确";
+      // 邮箱常见的英文错误翻译
+      let friendlyMsg = msg;
+      if (/value is not a valid email/i.test(msg)) friendlyMsg = "邮箱格式不正确";
+      else if (/at least 8/i.test(msg) || /string_too_short/i.test(msg)) friendlyMsg = "长度不足 8 位";
+      else if (/already/i.test(msg)) friendlyMsg = msg;
+      return `${fieldName}：${friendlyMsg}`;
+    }
+    return JSON.stringify(detail);
+  }
+  if (a.message) return a.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
 }

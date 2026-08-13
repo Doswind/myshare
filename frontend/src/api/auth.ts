@@ -60,7 +60,7 @@ export const authApi = {
   resetPassword: (token: string, new_password: string) =>
     client.post<{ ok: boolean }>("/auth/reset-password", { token, new_password }).then((r) => r.data),
 
-  updateProfile: (data: { display_name: string; phone: string; avatar: string }) =>
+  updateProfile: (data: { display_name: string; phone: string; avatar: string; email?: string }) =>
     client.patch<UserInfo>("/users/me", data).then((r) => r.data),
 };
 
