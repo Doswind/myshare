@@ -59,6 +59,7 @@ export interface SectorStock {
 export interface SectorGroup {
   industry_name: string;
   stock_count: number;
+  funded_count?: number;
   avg_change_pct?: number;
   total_market_value?: number;
   stocks: SectorStock[];

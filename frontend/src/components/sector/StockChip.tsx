@@ -48,7 +48,11 @@ export function StockChip({ stock, onClick }: StockChipProps) {
           {down && <TrendingDown className="w-2.5 h-2.5" />}
           {fmtPct(stock.change_pct)}
         </span>
-        <span className="text-[10px] text-slate-400">×{stock.fund_count}</span>
+        {(stock.fund_count ?? 0) > 0 ? (
+          <span className="text-[10px] text-slate-400">×{stock.fund_count}</span>
+        ) : (
+          <span className="text-[9px] text-slate-300 px-1 rounded bg-slate-100">无重仓</span>
+        )}
       </div>
     </button>
   );

@@ -49,6 +49,9 @@ export function SectorCard({ sector, dragging, onSectorClick, onStockClick, onSh
           </span>
           <span className="text-[10px] text-slate-400 tabular">
             {sector.stock_count}只
+            {(sector.funded_count ?? 0) > 0 && sector.funded_count !== sector.stock_count && (
+              <span className="text-slate-300">（{sector.funded_count}只重仓）</span>
+            )}
           </span>
         </div>
         <div

@@ -398,9 +398,13 @@ export default function StockListPage() {
                     {s.market_cap != null ? `${s.market_cap.toFixed(1)}亿` : "--"}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular">
-                    <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-100">
-                      {s.fund_count ?? 0}
-                    </span>
+                    {(s.fund_count ?? 0) > 0 ? (
+                      <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-100">
+                        {s.fund_count}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-300">无重仓</span>
+                    )}
                   </td>
                   {tab === "sector" && (
                     <td className="px-3 py-1.5 text-right tabular text-slate-700">
@@ -462,9 +466,13 @@ export default function StockListPage() {
               <div className="flex items-center justify-between text-[10px] text-slate-500">
                 <span className="truncate">{s.industry_name ?? "--"}</span>
                 <span className="flex items-center gap-2 shrink-0 ml-2 tabular">
-                  <span className="inline-flex items-center justify-center min-w-[20px] px-1 rounded bg-blue-50 text-blue-700 border border-blue-100">
-                    {s.fund_count ?? 0}只
-                  </span>
+                  {(s.fund_count ?? 0) > 0 ? (
+                    <span className="inline-flex items-center justify-center min-w-[20px] px-1 rounded bg-blue-50 text-blue-700 border border-blue-100">
+                      {s.fund_count}只
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-300">无重仓</span>
+                  )}
                   <span>市值 {s.market_cap != null ? `${s.market_cap.toFixed(0)}亿` : "--"}</span>
                   {tab === "watchlist" && (
                     <span onClick={(e) => e.stopPropagation()}>

@@ -82,33 +82,21 @@ class AggregationService:
             .subquery()
         )
 
-        # 2. 最新一期报告日期（取所有主力基金持仓中最新一期）
-        latest_date = (
+        # 2. 最新一期报告日期（可能为 None：还没抓取过持仓）
+        latest_date_row = (
             db.query(FundHolding.report_date)
             .filter(FundHolding.fund_code.in_(main_subq))
             .order_by(FundHolding.report_date.desc())
             .first()
         )
-        if not latest_date:
-            return {"total": 0, "page": page, "page_size": page_size, "sectors": []}
-        latest_date = latest_date[0]
+        latest_date = latest_date_row[0] if latest_date_row else None
 
-        # 3. 拿所有持仓涉及的股票代码 + 行业
-        holding_subq = (
-            db.query(
-                FundHolding.fund_code,
-                FundHolding.stock_code,
-                FundHolding.ratio_net,
-                FundHolding.market_value,
-            )
-            .filter(
-                FundHolding.fund_code.in_(main_subq),
-                FundHolding.report_date == latest_date,
-            )
-            .subquery()
-        )
+        # 3. 持仓聚合子查询（用于后续 agg_rows，不参与 base 查询的 JOIN）
+        holding_filters = [FundHolding.fund_code.in_(main_subq)]
+        if latest_date:
+            holding_filters.append(FundHolding.report_date == latest_date)
 
-        # 4. JOIN stock + 最新 quote
+        # 4. base 查询：stock 表 + 最新 quote（不再 INNER JOIN holdings）
         latest_quote_subq = (
             db.query(
                 StockQuote.code,
@@ -127,7 +115,6 @@ class AggregationService:
                 StockQuote.change_pct,
                 StockQuote.market_cap,
             )
-            .join(holding_subq, holding_subq.c.stock_code == Stock.code)
             .outerjoin(
                 latest_quote_subq,
                 latest_quote_subq.c.code == Stock.code,
@@ -138,6 +125,10 @@ class AggregationService:
                     StockQuote.code == Stock.code,
                     StockQuote.snapshot_at == latest_quote_subq.c.max_at,
                 ),
+            )
+            .filter(
+                Stock.industry_name.isnot(None),
+                Stock.industry_name != "",
             )
             .group_by(Stock.code, Stock.name, Stock.industry_name, StockQuote.price,
                       StockQuote.change_pct, StockQuote.market_cap)
@@ -164,9 +155,8 @@ class AggregationService:
             return {"total": 0, "page": page, "page_size": page_size, "sectors": []}
 
         # 5. 内存聚合：按股票计算 fund_count / total_market_value
-        #    重新查一次用于聚合（因为 SQL 不好搞 distinct count by group）
         stock_codes = [r.code for r in rows]
-        agg_rows = (
+        agg_query = (
             db.query(
                 FundHolding.stock_code,
                 func.count(distinct(FundHolding.fund_code)).label("fund_count"),
@@ -176,11 +166,11 @@ class AggregationService:
             .filter(
                 FundHolding.fund_code.in_(main_subq),
                 FundHolding.stock_code.in_(stock_codes),
-                FundHolding.report_date == latest_date,
             )
-            .group_by(FundHolding.stock_code)
-            .all()
         )
+        if latest_date:
+            agg_query = agg_query.filter(FundHolding.report_date == latest_date)
+        agg_rows = agg_query.group_by(FundHolding.stock_code).all()
         agg_map = {
             r.stock_code: {
                 "fund_count": r.fund_count or 0,
@@ -223,9 +213,11 @@ class AggregationService:
         for ind, stocks in grouped.items():
             valid_chg = [s["change_pct"] for s in stocks if s.get("change_pct") is not None]
             total_mv = sum(s.get("total_market_value") or 0 for s in stocks)
+            funded = sum(1 for s in stocks if (s.get("fund_count") or 0) > 0)
             sector_list.append({
                 "industry_name": ind,
                 "stock_count": len(stocks),
+                "funded_count": funded,
                 "avg_change_pct": (sum(valid_chg) / len(valid_chg)) if valid_chg else None,
                 "total_market_value": total_mv,
                 "stocks": stocks,
@@ -247,9 +239,11 @@ class AggregationService:
         for ind, stocks in grouped2.items():
             valid_chg = [s["change_pct"] for s in stocks if s.get("change_pct") is not None]
             total_mv = sum(s.get("total_market_value") or 0 for s in stocks)
+            funded = sum(1 for s in stocks if (s.get("fund_count") or 0) > 0)
             paged_sectors.append({
                 "industry_name": ind,
                 "stock_count": len(stocks),
+                "funded_count": funded,
                 "avg_change_pct": (sum(valid_chg) / len(valid_chg)) if valid_chg else None,
                 "total_market_value": total_mv,
                 "stocks": stocks,

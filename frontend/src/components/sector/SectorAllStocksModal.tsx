@@ -81,7 +81,12 @@ export function SectorAllStocksModal({ sector, reportDate, onClose, onStockClick
               {sector.industry_name}
             </h3>
             <span className="text-[11px] text-slate-500">
-              共 {sector.stocks.length} 只主力基金重仓股
+              共 {sector.stocks.length} 只
+              {(sector.funded_count ?? 0) > 0 && (
+                <span className="text-slate-400">
+                  （{sector.funded_count} 只有基金重仓）
+                </span>
+              )}
               {reportDate && (
                 <span className="ml-2">· 持仓报告期 {reportDate}</span>
               )}
@@ -195,7 +200,11 @@ export function SectorAllStocksModal({ sector, reportDate, onClose, onStockClick
                       </span>
                     </td>
                     <td className="px-3 py-1.5 text-right tabular text-slate-700">
-                      ×{s.fund_count ?? 0}
+                      {(s.fund_count ?? 0) > 0 ? (
+                        `×${s.fund_count}`
+                      ) : (
+                        <span className="text-slate-300 text-[10px]">无重仓</span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular text-slate-700">
                       {fmtMv(s.total_market_value)}
