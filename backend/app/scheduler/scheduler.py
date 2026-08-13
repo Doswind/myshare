@@ -175,10 +175,24 @@ def _parse_hhmm(s: str) -> Optional[dtime]:
         return None
 
 
-def _is_trading_day() -> bool:
-    """粗略判断 A 股交易日：周末不算，节假日不全"""
-    # TODO: 接入 chinese_calendar 库判断精确节假日；这里先用周末
-    return datetime.now().weekday() < 5
+def _is_trading_day(d: Optional[datetime] = None) -> bool:
+    """A 股交易日判断（精确：周末 + 节假日 + 调休补班都算）
+
+    依赖 chinese_calendar 库，覆盖 2004-2026 A 股日历
+    库不覆盖的远期日期（如 2027+）降级为周末判断
+    """
+    from datetime import date
+    target = (d or datetime.now()).date()
+    try:
+        # is_workday: True=调休补班的周末 / 工作日；False=法定节假日 / 正常周末
+        # 交易日 = 是工作日 且 不是周末
+        from chinese_calendar import is_workday, is_holiday
+        # is_workday 已经包含了"是工作日（含调休补班的周末）"的判断
+        # A 股交易日 = is_workday=True
+        return bool(is_workday(target))
+    except (NotImplementedError, ValueError):
+        # 远期日期库不支持 → 降级为周末判断
+        return target.weekday() < 5
 
 
 def _in_window(now_t: dtime, start: Optional[dtime], end: Optional[dtime]) -> bool:
