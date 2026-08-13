@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import funds, holdings, stocks, sectors, filters, jobs, watchlist, crawl_config
+from app.api import funds, holdings, stocks, sectors, filters, jobs, watchlist, crawl_config, rbac
 from app.config import settings
 from app.database import init_db
 from app.scheduler.scheduler import scheduler, register_jobs
+from app.services.rbac_seed import seed_rbac
 
 logging.basicConfig(
     level=logging.INFO if not settings.app_debug else logging.DEBUG,
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """启动 / 关闭钩子"""
     init_db()
+    seed_rbac()
     register_jobs()
     try:
         scheduler.start()
@@ -58,6 +60,8 @@ app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(watchlist.router, prefix="/api/watchlist", tags=["watchlist"])
 app.include_router(crawl_config.router, prefix="/api/crawl-config", tags=["crawl-config"])
+for r in rbac.routers:
+    app.include_router(r)
 
 
 @app.get("/api/health")

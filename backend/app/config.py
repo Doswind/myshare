@@ -35,6 +35,24 @@ class Settings(BaseSettings):
     crawl_fund_minute: int = 0
     crawl_quote_interval_minutes: int = 5
 
+    # ============ Auth / JWT / Email ============
+    # JWT secret：生产环境务必通过环境变量设置
+    jwt_secret: str = "fund-analyzer-dev-secret-change-me-in-production"
+    jwt_access_ttl_min: int = 60 * 12      # 12 小时（前端 SPA 长会话）
+    jwt_refresh_ttl_days: int = 7
+
+    # 邮件 (QQ 邮箱 SMTP 示例；如用其他服务改 host/port)
+    email_enabled: bool = False
+    email_smtp_host: str = "smtp.qq.com"
+    email_smtp_port: int = 465
+    email_username: str = ""               # 完整邮箱
+    email_password: str = ""               # SMTP 授权码（非邮箱密码）
+    email_from_name: str = "Fund Analyzer"
+    email_reset_ttl_min: int = 30
+
+    # 前端地址（邮件重置链接拼接用）
+    frontend_base_url: str = "http://localhost:5173"
+
     @property
     def db_url(self) -> str:
         return f"sqlite:///{self.db_path}"
