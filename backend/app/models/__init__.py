@@ -6,6 +6,7 @@ from app.models.sector import Sector, SectorMember
 from app.models.quote import StockQuote
 from app.models.job_log import JobLog
 from app.models.watchlist import Watchlist
+from app.models.crawl_config import CrawlConfig
 
 __all__ = [
     "Fund",
@@ -16,4 +17,5 @@ __all__ = [
     "StockQuote",
     "JobLog",
     "Watchlist",
+    "CrawlConfig",
 ]

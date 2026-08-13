@@ -59,10 +59,16 @@ async def list_scheduled():
     """当前已注册的所有调度任务"""
     out = []
     for job in scheduler.get_jobs():
+        next_run = None
+        try:
+            next_run = job.next_run_time.isoformat() if job.next_run_time else None
+        except (AttributeError, TypeError):
+            # scheduler 未启动时 next_run_time 可能不可用
+            pass
         out.append({
             "id": job.id,
             "name": job.name,
-            "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+            "next_run": next_run,
             "trigger": str(job.trigger),
         })
     return out

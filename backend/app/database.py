@@ -29,8 +29,11 @@ Base = declarative_base()
 def init_db():
     """初始化所有表（首次启动或新增表时调用）"""
     # 引入所有模型以注册 metadata
-    from app.models import Fund, FundHolding, Stock, Sector, SectorMember, StockQuote, JobLog, Watchlist
+    from app.models import Fund, FundHolding, Stock, Sector, SectorMember, StockQuote, JobLog, Watchlist, CrawlConfig
     Base.metadata.create_all(bind=engine)
+    # 首次启动：写入默认抓取配置
+    from app.services.crawl_config_service import CrawlConfigService
+    CrawlConfigService.seed_defaults()
 
 
 def get_db():

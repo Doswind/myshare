@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import funds, holdings, stocks, sectors, filters, jobs, watchlist
+from app.api import funds, holdings, stocks, sectors, filters, jobs, watchlist, crawl_config
 from app.config import settings
 from app.database import init_db
 from app.scheduler.scheduler import scheduler, register_jobs
@@ -57,6 +57,7 @@ app.include_router(sectors.router, prefix="/api/sectors", tags=["sectors"])
 app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(watchlist.router, prefix="/api/watchlist", tags=["watchlist"])
+app.include_router(crawl_config.router, prefix="/api/crawl-config", tags=["crawl-config"])
 
 
 @app.get("/api/health")

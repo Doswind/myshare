@@ -124,3 +124,17 @@ export interface FilterDefaults {
   price_max: number | null;
   industry: string | null;
 }
+
+export interface CrawlConfig {
+  job_key: string;
+  display_name: string;
+  cron_type: "off" | "daily" | "interval";
+  interval_minutes: number;
+  time_of_day: string;       // HH:MM
+  window_start: string;       // HH:MM
+  window_end: string;         // HH:MM
+  trading_only: boolean;
+  enabled: boolean;
+  description: string;
+  updated_at?: string;
+}

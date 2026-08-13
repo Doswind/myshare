@@ -8,7 +8,13 @@ import {
   triggerQuoteRefresh,
   triggerSectorRefresh,
 } from "@/api/stocks";
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import {
+  fetchCrawlConfigs,
+  bulkUpdateCrawlConfigs,
+  resetCrawlConfigs,
+} from "@/api/crawlConfig";
+import type { CrawlConfig } from "@/types/api";
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw } from "lucide-react";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -23,8 +29,15 @@ export default function SettingsPage() {
     queryFn: fetchJobs,
     refetchInterval: 10_000,
   });
+  const { data: crawlConfigs = [] } = useQuery({
+    queryKey: ["crawl-configs"],
+    queryFn: fetchCrawlConfigs,
+    refetchInterval: 15_000,
+  });
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  const [draftConfigs, setDraftConfigs] = useState<Record<string, CrawlConfig>>({});
+  const [saving, setSaving] = useState(false);
 
   const showToast = (type: "ok" | "err", msg: string) => {
     setToast({ type, msg });
@@ -107,6 +120,46 @@ export default function SettingsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* 抓取策略配置 */}
+      <CrawlStrategySection
+        configs={crawlConfigs}
+        draft={draftConfigs}
+        setDraft={setDraftConfigs}
+        saving={saving}
+        setSaving={setSaving}
+        onSave={async () => {
+          setSaving(true);
+          try {
+            const items = Object.values(draftConfigs);
+            if (items.length === 0) {
+              showToast("ok", "未修改");
+            } else {
+              await bulkUpdateCrawlConfigs(items);
+              qc.invalidateQueries({ queryKey: ["crawl-configs"] });
+              qc.invalidateQueries({ queryKey: ["scheduled-jobs"] });
+              setDraftConfigs({});
+              showToast("ok", `已保存 ${items.length} 条配置，调度器已热重载`);
+            }
+          } catch (e: any) {
+            showToast("err", `保存失败：${formatErr(e)}`);
+          } finally {
+            setSaving(false);
+          }
+        }}
+        onReset={async () => {
+          if (!confirm("确定要重置所有抓取配置为默认值吗？")) return;
+          try {
+            await resetCrawlConfigs();
+            qc.invalidateQueries({ queryKey: ["crawl-configs"] });
+            qc.invalidateQueries({ queryKey: ["scheduled-jobs"] });
+            setDraftConfigs({});
+            showToast("ok", "已重置为默认配置");
+          } catch (e: any) {
+            showToast("err", `重置失败：${formatErr(e)}`);
+          }
+        }}
+      />
 
       {/* 主力筛选默认阈值 */}
       <div className="rounded-md border border-slate-200 bg-white p-3">
@@ -247,4 +300,194 @@ function formatErr(e: unknown): string {
   }
   if (a.message) return a.message;
   try { return JSON.stringify(e); } catch { return String(e); }
+}
+
+// ---------- 抓取策略配置子组件 ----------
+function CrawlStrategySection({
+  configs,
+  draft,
+  setDraft,
+  saving,
+  onSave,
+  onReset,
+}: {
+  configs: CrawlConfig[];
+  draft: Record<string, CrawlConfig>;
+  setDraft: React.Dispatch<React.SetStateAction<Record<string, CrawlConfig>>>;
+  saving: boolean;
+  setSaving: React.Dispatch<React.SetStateAction<boolean>>;
+  onSave: () => void;
+  onReset: () => void;
+}) {
+  // 合并：已保存配置 ∪ 用户草稿
+  const merged: CrawlConfig[] = configs.map((c) => draft[c.job_key] || c);
+
+  const updateField = <K extends keyof CrawlConfig>(key: string, field: K, value: CrawlConfig[K]) => {
+    setDraft((prev) => {
+      const base = prev[key] || configs.find((c) => c.job_key === key)!;
+      return { ...prev, [key]: { ...base, [field]: value } };
+    });
+  };
+
+  const dirtyCount = Object.keys(draft).length;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <div className="text-[13px] font-semibold text-slate-800">抓取策略配置</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            修改后保存即可热重载调度器，无需重启服务。
+            <span className="ml-2">关闭=不调度 · daily=每天定时 · interval=按周期（可设交易窗口）</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onReset}
+            disabled={saving}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 text-[11px] disabled:opacity-50"
+          >
+            <RotateCcw className="w-3 h-3" /> 重置默认
+          </button>
+          <button
+            onClick={onSave}
+            disabled={saving || dirtyCount === 0}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-700 text-white hover:bg-slate-800 text-[11px] disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+            保存 {dirtyCount > 0 && <span className="ml-1">({dirtyCount})</span>}
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px] min-w-[760px]">
+          <thead className="text-slate-500 text-[11px] bg-slate-50">
+            <tr>
+              <th className="text-left py-1.5 px-2 font-normal w-8">开</th>
+              <th className="text-left py-1.5 px-2 font-normal">任务</th>
+              <th className="text-left py-1.5 px-2 font-normal w-24">类型</th>
+              <th className="text-left py-1.5 px-2 font-normal w-32">频率/时间</th>
+              <th className="text-left py-1.5 px-2 font-normal w-40">运行窗口</th>
+              <th className="text-left py-1.5 px-2 font-normal w-16">仅交易日</th>
+              <th className="text-left py-1.5 px-2 font-normal">说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {merged.map((c) => {
+              const dirty = !!draft[c.job_key];
+              return (
+                <tr key={c.job_key} className={`border-t border-slate-100 ${dirty ? "bg-amber-50/50" : ""}`}>
+                  {/* 开关 */}
+                  <td className="py-1.5 px-2">
+                    <button
+                      onClick={() => updateField(c.job_key, "enabled", !c.enabled)}
+                      className={`w-7 h-4 rounded-full transition-colors relative ${
+                        c.enabled ? "bg-emerald-500" : "bg-slate-300"
+                      }`}
+                      title={c.enabled ? "已启用" : "已关闭"}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
+                          c.enabled ? "left-3.5" : "left-0.5"
+                        }`}
+                      />
+                    </button>
+                  </td>
+                  {/* 任务名 */}
+                  <td className="py-1.5 px-2 text-slate-800">
+                    <div>{c.display_name}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">{c.job_key}</div>
+                  </td>
+                  {/* 类型 */}
+                  <td className="py-1.5 px-2">
+                    <select
+                      value={c.cron_type}
+                      onChange={(e) => updateField(c.job_key, "cron_type", e.target.value as CrawlConfig["cron_type"])}
+                      disabled={!c.enabled}
+                      className="px-1.5 py-0.5 border border-slate-300 rounded text-[12px] disabled:bg-slate-50 disabled:text-slate-400"
+                    >
+                      <option value="off">关闭</option>
+                      <option value="daily">每天定时</option>
+                      <option value="interval">按周期</option>
+                    </select>
+                  </td>
+                  {/* 频率/时间 */}
+                  <td className="py-1.5 px-2">
+                    {c.cron_type === "daily" && (
+                      <input
+                        type="time"
+                        value={c.time_of_day}
+                        onChange={(e) => updateField(c.job_key, "time_of_day", e.target.value)}
+                        disabled={!c.enabled}
+                        className="w-24 px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                      />
+                    )}
+                    {c.cron_type === "interval" && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-slate-500 text-[11px]">每</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1440}
+                          value={c.interval_minutes}
+                          onChange={(e) => updateField(c.job_key, "interval_minutes", Number(e.target.value) || 1)}
+                          disabled={!c.enabled}
+                          className="w-14 px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                        />
+                        <span className="text-slate-500 text-[11px]">分</span>
+                      </div>
+                    )}
+                    {c.cron_type === "off" && <span className="text-slate-300">--</span>}
+                  </td>
+                  {/* 运行窗口 */}
+                  <td className="py-1.5 px-2">
+                    {c.cron_type === "interval" ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="time"
+                          value={c.window_start}
+                          onChange={(e) => updateField(c.job_key, "window_start", e.target.value)}
+                          disabled={!c.enabled}
+                          className="w-20 px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                        />
+                        <span className="text-slate-400 text-[11px]">~</span>
+                        <input
+                          type="time"
+                          value={c.window_end}
+                          onChange={(e) => updateField(c.job_key, "window_end", e.target.value)}
+                          disabled={!c.enabled}
+                          className="w-20 px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-slate-300 text-[11px]">--</span>
+                    )}
+                  </td>
+                  {/* 仅交易日 */}
+                  <td className="py-1.5 px-2">
+                    {c.cron_type === "interval" ? (
+                      <input
+                        type="checkbox"
+                        checked={c.trading_only}
+                        onChange={(e) => updateField(c.job_key, "trading_only", e.target.checked)}
+                        disabled={!c.enabled}
+                        className="w-3.5 h-3.5"
+                      />
+                    ) : (
+                      <span className="text-slate-300">--</span>
+                    )}
+                  </td>
+                  {/* 说明 */}
+                  <td className="py-1.5 px-2 text-[11px] text-slate-500 leading-tight">
+                    {c.description}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
