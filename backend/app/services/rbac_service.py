@@ -208,16 +208,29 @@ class UserService:
     def update_user(
         db: Session,
         user: User,
+        acting_admin: User,
         email: Optional[str] = None,
         is_active: Optional[bool] = None,
         role_ids: Optional[List[int]] = None,
     ) -> User:
-        """管理员更新用户"""
+        """管理员更新用户（含安全约束）"""
         if email and email != user.email:
             if db.query(User).filter(User.email == email, User.id != user.id).first():
                 raise HTTPException(status_code=400, detail="邮箱已被其他用户使用")
             user.email = email
-        if is_active is not None:
+        if is_active is not None and is_active != user.is_active:
+            # 不能禁用自己
+            if user.id == acting_admin.id and not is_active:
+                raise HTTPException(status_code=400, detail="不能禁用自己的账号")
+            # 不能禁用最后一个启用中的管理员
+            if not is_active and user.is_admin:
+                active_admin_count = (
+                    db.query(User)
+                    .filter(User.is_admin == True, User.is_active == True, User.id != user.id)  # noqa: E712
+                    .count()
+                )
+                if active_admin_count == 0:
+                    raise HTTPException(status_code=400, detail="不能禁用最后一个启用中的管理员")
             user.is_active = is_active
         if role_ids is not None:
             roles = db.query(Role).filter(Role.id.in_(role_ids)).all() if role_ids else []

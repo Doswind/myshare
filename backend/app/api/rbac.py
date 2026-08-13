@@ -215,7 +215,7 @@ def update_user(
     if not target:
         raise HTTPException(404, "用户不存在")
     try:
-        user = UserService.update_user(db, target, **req.model_dump(exclude_unset=True))
+        user = UserService.update_user(db, target, acting_admin=admin, **req.model_dump(exclude_unset=True))
     except HTTPException as e:
         write_audit(db, "update_user", user_id=admin.id, username=admin.username, target=target.username, detail=str(e.detail), ip=_client_ip(request), ok=False)
         raise

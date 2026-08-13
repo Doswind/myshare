@@ -2,10 +2,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usersApi, rolesApi, type UserInfo, type Role } from "@/api/auth";
-import { Plus, Trash2, KeyRound, ToggleLeft, ToggleRight, X, ShieldCheck, ShieldOff } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Plus, Trash2, KeyRound, ToggleLeft, ToggleRight, X } from "lucide-react";
 
 export default function UsersAdminPage() {
   const qc = useQueryClient();
+  const { user: currentUser } = useAuth();
   const { data: users = [] } = useQuery({ queryKey: ["admin-users"], queryFn: () => usersApi.list() });
   const { data: roles = [] } = useQuery({ queryKey: ["admin-roles"], queryFn: () => rolesApi.list() });
   const [showCreate, setShowCreate] = useState(false);
@@ -16,6 +18,23 @@ export default function UsersAdminPage() {
     mutationFn: (id: number) => usersApi.remove(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
   });
+
+  const toggleActive = useMutation({
+    mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) =>
+      usersApi.update(id, { is_active }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      const u = users.find((x) => x.id === vars.id);
+      showToast("ok", `已${vars.is_active ? "启用" : "禁用"}：${u?.username || ""}`);
+    },
+    onError: (e: any) => showToast("err", formatErr(e)),
+  });
+
+  const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  const showToast = (type: "ok" | "err", msg: string) => {
+    setToast({ type, msg });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   return (
     <div className="space-y-3">
@@ -78,11 +97,44 @@ export default function UsersAdminPage() {
                 <td className="px-3 py-2 text-slate-400 text-[11px]">
                   {u.last_login_at ? new Date(u.last_login_at).toLocaleString("zh-CN", { hour12: false }) : "—"}
                 </td>
-                <td className="px-3 py-2 text-right space-x-1">
+                <td className="px-3 py-2 text-right space-x-1 whitespace-nowrap">
+                  <button
+                    onClick={() => {
+                      const action = u.is_active ? "禁用" : "启用";
+                      if (u.id === currentUser?.id) {
+                        showToast("err", "不能禁用自己的账号");
+                        return;
+                      }
+                      if (
+                        !confirm(
+                          `确定要${action}用户「${u.username}」吗？${
+                            !u.is_active ? "" : "\n禁用后该用户将无法登录。"
+                          }`
+                        )
+                      )
+                        return;
+                      toggleActive.mutate({ id: u.id, is_active: !u.is_active });
+                    }}
+                    disabled={toggleActive.isPending}
+                    className={`inline-flex items-center gap-0.5 text-[11px] hover:underline disabled:opacity-50 ${
+                      u.is_active ? "text-slate-500" : "text-emerald-600"
+                    }`}
+                    title={u.id === currentUser?.id ? "不能禁用自己的账号" : u.is_active ? "禁用此用户" : "启用此用户"}
+                  >
+                    {u.is_active ? (
+                      <>
+                        <ToggleRight className="w-3.5 h-3.5" /> 禁用
+                      </>
+                    ) : (
+                      <>
+                        <ToggleLeft className="w-3.5 h-3.5" /> 启用
+                      </>
+                    )}
+                  </button>
                   <button
                     onClick={() => setEditingUser(u)}
                     className="text-blue-600 hover:underline text-[11px]"
-                    title="编辑角色 / 状态"
+                    title="编辑角色 / 邮箱"
                   >
                     编辑
                   </button>
@@ -95,9 +147,14 @@ export default function UsersAdminPage() {
                   </button>
                   <button
                     onClick={() => {
+                      if (u.id === currentUser?.id) {
+                        showToast("err", "不能删除自己的账号");
+                        return;
+                      }
                       if (confirm(`确定删除用户 ${u.username} 吗？`)) del.mutate(u.id);
                     }}
                     className="text-red-600 hover:underline text-[11px]"
+                    title={u.id === currentUser?.id ? "不能删除自己" : "删除用户"}
                   >
                     <Trash2 className="w-3 h-3 inline" />
                   </button>
@@ -142,6 +199,16 @@ export default function UsersAdminPage() {
           onClose={() => setResettingUser(null)}
           onReset={() => setResettingUser(null)}
         />
+      )}
+
+      {toast && (
+        <div
+          className={`fixed bottom-4 right-4 z-50 px-3 py-2 rounded shadow text-[12px] ${
+            toast.type === "ok" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
+          }`}
+        >
+          {toast.msg}
+        </div>
       )}
     </div>
   );
