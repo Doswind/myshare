@@ -69,8 +69,14 @@ def job_funds_full():
 
 
 def job_fund_nav():
-    """每日 20:30 抓基金正式净值（重跑 funds_full 的列表部分，覆盖最新净值）"""
-    log_id = _new_log("sched_fund_nav", "定时：基金正式净值")
+    """每日 20:30 抓基金正式净值 + 基金详情（评级/经理）
+
+    合并原因：
+    - 净值更新后紧接着刷详情，逻辑连贯
+    - 都是交易日晚上跑，用户少配一个任务
+    - fund_details 抓的是主力基金详情（500 只），3-5 分钟即可完成
+    """
+    log_id = _new_log("sched_fund_nav", "定时：基金净值+详情")
     try:
         from app.scrapers.eastmoney_funds import EastmoneyFundsScraper
 
@@ -79,21 +85,31 @@ def job_fund_nav():
             try:
                 db = SessionLocal()
                 try:
+                    # 阶段 1：抓基金列表（净值/规模/收益率）
                     total = 0
                     for ft in FundService.FUND_TYPES:
                         items = await sc.fetch_all_streaming(ft, max_pages=60, on_batch=None)
                         cnt = FundService.upsert_funds(db, items)
                         total += cnt
                     FundService.recalc_main_flag(db)
-                    return total
+                    logger.info("[sched] fund_nav: 净值抓取完成，%d funds", total)
+
+                    # 阶段 2：抓主力基金详情（评级/经理/管理人）
+                    from app.models.fund import Fund
+                    codes = [c for (c,) in db.query(Fund.code).filter(Fund.is_main == 1).all()]
+                    detail_result = await FundService.refresh_fund_details(codes)
+                    logger.info("[sched] fund_nav: 详情抓取完成，%d funds",
+                                detail_result.get("updated", 0))
+                    return {"funds_upserted": total, "details_updated": detail_result.get("updated", 0)}
                 finally:
                     db.close()
             finally:
                 await sc.close()
 
-        total = _run_async(_run())
-        _finish_log(log_id, "success", items=total)
-        logger.info("[sched] fund_nav done: %d funds", total)
+        result = _run_async(_run())
+        _finish_log(log_id, "success",
+                    items=(result.get("funds_upserted", 0) + result.get("details_updated", 0)))
+        logger.info("[sched] fund_nav done: %s", result)
     except Exception as e:
         logger.exception("[sched] fund_nav failed")
         _finish_log(log_id, "failed", err=str(e))
@@ -125,23 +141,6 @@ def job_sectors():
         _finish_log(log_id, "failed", err=str(e))
 
 
-def job_fund_details():
-    log_id = _new_log("sched_fund_details", "定时：基金详情(评级/经理)")
-    try:
-        # 只刷主力
-        db = SessionLocal()
-        try:
-            from app.models.fund import Fund
-            codes = [c for (c,) in db.query(Fund.code).filter(Fund.is_main == 1).all()]
-        finally:
-            db.close()
-        result = _run_async(FundService.refresh_fund_details(codes))
-        _finish_log(log_id, "success", items=result.get("updated", 0))
-    except Exception as e:
-        logger.exception("[sched] fund_details failed")
-        _finish_log(log_id, "failed", err=str(e))
-
-
 def job_stock_details():
     log_id = _new_log("sched_stock_details", "定时：股票详情(行业)")
     try:
@@ -158,7 +157,6 @@ JOB_REGISTRY: Dict[str, Callable] = {
     "fund_nav": job_fund_nav,
     "quotes": job_quotes,
     "sectors": job_sectors,
-    "fund_details": job_fund_details,
     "stock_details": job_stock_details,
 }
 

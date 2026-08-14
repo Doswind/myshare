@@ -28,13 +28,13 @@ DEFAULTS: List[Dict[str, Any]] = [
     },
     {
         "job_key": "fund_nav",
-        "display_name": "基金正式净值",
+        "display_name": "基金净值+详情",
         "cron_type": "daily",
         "time_of_day": "20:35",
         "trading_only": True,
         "trading_only_locked": True,
         "enabled": True,
-        "description": f"基金公司 20:00 后公布当日净值，覆盖估算值。{LOCKED_REASON}",
+        "description": f"基金公司 20:00 后公布当日净值，覆盖估算值；同时刷新主力基金的评级/经理/管理人。{LOCKED_REASON}",
     },
     {
         "job_key": "quotes",
@@ -57,16 +57,6 @@ DEFAULTS: List[Dict[str, Any]] = [
         "trading_only_locked": True,
         "enabled": True,
         "description": f"刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name。{LOCKED_REASON}",
-    },
-    {
-        "job_key": "fund_details",
-        "display_name": "基金详情(评级/经理)",
-        "cron_type": "daily",
-        "time_of_day": "22:00",
-        "trading_only": True,
-        "trading_only_locked": True,
-        "enabled": True,
-        "description": f"回填主力基金的风险等级 / 评级 / 经理 / 管理人（评级/经理节假日变化极少）。{LOCKED_REASON}",
     },
     {
         "job_key": "stock_details",

@@ -21,14 +21,14 @@ class JobGuard:
     _cooldown_until: Dict[str, float] = {}
 
     # 各手动抓取任务的冷却时间（秒）
-    # 基金全量抓取最重，给 10 分钟
+    # 基金全量抓取最重，给 10 分钟（含净值+详情）
     # 行情/行业/详情相对轻，给 1 分钟
     COOLDOWN_SECONDS = {
         "manual_funds": 10 * 60,
+        "manual_fund_nav": 10 * 60,  # 基金净值+详情（合并后）
         "manual_quotes": 60,
         "manual_sectors": 60,
         "manual_stock_details": 30,
-        "manual_fund_details": 60,
     }
 
     @classmethod

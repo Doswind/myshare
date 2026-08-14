@@ -51,6 +51,8 @@ def _migrate_columns():
             if "trading_only_locked" not in cols:
                 conn.execute(text("ALTER TABLE crawl_config ADD COLUMN trading_only_locked BOOLEAN DEFAULT 0"))
                 logger.info("DB 迁移: crawl_config 添加 trading_only_locked 列")
+            # 删除已合并到 fund_nav 的 fund_details 配置行
+            conn.execute(text("DELETE FROM crawl_config WHERE job_key = 'fund_details'"))
 
     if "watchlist" in insp.get_table_names():
         _migrate_watchlist_per_user()
