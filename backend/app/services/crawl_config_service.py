@@ -18,13 +18,13 @@ LOCKED_REASON = "该任务在周末/节假日抓取无意义，已强制锁定�
 DEFAULTS: List[Dict[str, Any]] = [
     {
         "job_key": "funds_full",
-        "display_name": "基金列表+全量持仓",
+        "display_name": "基金列表+持仓",
         "cron_type": "daily",
         "time_of_day": "21:30",
         "trading_only": True,
         "trading_only_locked": True,
-        "enabled": True,
-        "description": f"全量抓基金列表 + 全部基金(7100+)最新季报重仓持仓，约 15-30 分钟。{LOCKED_REASON}",
+        "enabled": False,  # 默认关闭，改为每周手动触发或通过 cron_type=interval + interval_minutes=10080(7天) 实现
+        "description": f"全量抓基金列表(按阈值过滤) + 持仓。基金季报数据变化慢，建议每周抓一次。{LOCKED_REASON}",
     },
     {
         "job_key": "fund_nav",

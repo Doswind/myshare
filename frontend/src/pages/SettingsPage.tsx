@@ -171,7 +171,7 @@ export default function SettingsPage() {
               "funds",
               triggerFundRefresh,
               "基金+持仓抓取",
-              "将刷新全量基金列表（约 7100+ 只）并拉取全部基金最新季报重仓持仓。\n耗时约 20–30 分钟，完成后 10 分钟内不允许再次触发。",
+              "将全量抓取基金列表并按阈值过滤入库（清除不再满足阈值的旧基金），然后抓取全部基金的最新季报重仓持仓。\n耗时约 5-10 分钟，完成后 10 分钟内不允许再次触发。",
             )}
           />
           <RefreshButton
@@ -185,7 +185,7 @@ export default function SettingsPage() {
               "holdings",
               triggerHoldingsRefresh,
               "持仓抓取",
-              "将拉取全部基金（7100+ 只）最新季报重仓持仓，不刷新基金列表。\n耗时约 15–25 分钟，完成后 10 分钟内不允许再次触发。",
+              "将拉取 fund 表中全部基金的最新季报重仓持仓，不刷新基金列表。\n耗时约 5-10 分钟，完成后 10 分钟内不允许再次触发。",
             )}
           />
           <RefreshButton
@@ -370,7 +370,7 @@ export default function SettingsPage() {
           </button>
         </div>
         <p className="text-[10px] text-slate-400 mt-2">
-          阈值用于持仓看板的基金筛选（规模 ≥5亿 且 近1年 ≥5% 约 500+ 只主力基金）。持仓数据已覆盖全部 7100+ 只基金，调整阈值只会影响看板中参与聚合的基金范围。
+          阈值控制基金抓取范围（规模≥5亿 且 近1年≥5%）。fund 表只存满足阈值的基金，持仓看板从此范围内聚合股票。修改阈值后需重新抓「基金+持仓」生效。
         </p>
         <p className="text-[10px] text-slate-400 mt-1">
           自选股管理已迁移到「股票列表 → 我的自选」Tab。

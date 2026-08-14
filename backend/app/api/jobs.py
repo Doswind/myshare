@@ -203,30 +203,19 @@ async def trigger_stock_detail_refresh(background: BackgroundTasks):
 
 
 @router.post("/fund-details/refresh")
-async def trigger_fund_detail_refresh(background: BackgroundTasks, only_main: bool = True):
+async def trigger_fund_detail_refresh(background: BackgroundTasks):
     """手动触发：基金详情（风险等级 / 评级 / 经理 / 管理人）
-    only_main: True = 只刷主力基金（is_main=1，约 500 只，3-5 分钟）
 
-    注意：fund_details 已合并到 fund_nav 定时任务中，此端点保留用于单独手动触发。
+    刷新 fund 表全部基金的详情。
     JobGuard 锁与 manual_fund_nav 共享，避免同时跑净值+详情冲突。
     """
-    _acquire_or_fail("manual_fund_nav")  # 共享锁，避免与净值任务冲突
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        if only_main:
-            from app.models.fund import Fund
-            codes = [c for (c,) in db.query(Fund.code).filter(Fund.is_main == 1).all()]
-        else:
-            codes = [c for (c,) in db.query(Fund.code).all()]
-    finally:
-        db.close()
+    _acquire_or_fail("manual_fund_nav")
 
     async def _task():
-        return await FundService.refresh_fund_details(codes)
-    log_id = await _log_start("manual_fund_nav", f"手动刷新基金详情({len(codes)}只)")
-    asyncio.create_task(_run_with_log_id("manual_fund_nav", f"手动刷新基金详情({len(codes)}只)", _task, log_id))
-    return {"status": "started", "job_id": "manual_fund_nav", "log_id": log_id, "fund_count": len(codes)}
+        return await FundService.refresh_fund_details()
+    log_id = await _log_start("manual_fund_nav", "手动刷新基金详情")
+    asyncio.create_task(_run_with_log_id("manual_fund_nav", "手动刷新基金详情", _task, log_id))
+    return {"status": "started", "job_id": "manual_fund_nav", "log_id": log_id}
 
 
 # ---- 维护接口 ----

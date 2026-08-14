@@ -164,44 +164,67 @@ class FundService:
 
     @staticmethod
     async def refresh_all_funds(min_scale: Optional[float] = None, min_ret_1y: Optional[float] = None) -> Dict:
-        """拉所有基金 + 重算主力 + 抓全部基金持仓（流式，分批入库）"""
+        """全量抓取基金列表 → 按阈值过滤入库 → 抓持仓
+
+        流程：
+        1. 抓取东方财富全部基金（3类型，每类最多60页）
+        2. 按阈值过滤（scale_yi >= min_scale AND ret_1y >= min_ret_1y）
+        3. 先抓到新数据后，清除 fund 表中不再满足阈值的旧基金
+        4. 抓取 fund 表中全部基金的持仓
+        """
         from app.database import SessionLocal
+        ms = min_scale if min_scale is not None else settings.default_min_scale
+        mr = min_ret_1y if min_ret_1y is not None else settings.default_min_ret_1y
+        logger.info("基金抓取阈值: 规模>=%s亿, 近1年>=%s%%", ms, mr)
+
         sc = EastmoneyFundsScraper()
 
-        # 用流式抓取，每页直接入库
+        # 1. 流式抓取全部基金，先存到内存
+        all_items: List[Dict] = []
+        for ft in FundService.FUND_TYPES:
+            try:
+                items = await sc.fetch_all_streaming(ft, max_pages=60, on_batch=None)
+                all_items.extend(items)
+                logger.info("[%s] 抓取完成，%d 条", ft, len(items))
+            except Exception as e:
+                logger.error("抓取 %s 类型基金失败: %s", ft, e)
+        await sc.close()
+
+        if not all_items:
+            logger.error("未抓到任何基金数据，跳过入库")
+            return {"funds_upserted": 0, "holdings_upserted": 0}
+
+        # 2. 按阈值过滤
+        filtered = [
+            it for it in all_items
+            if (it.get("scale_yi") or 0) >= ms and (it.get("ret_1y") or 0) >= mr
+        ]
+        new_codes = {it["code"] for it in filtered if it.get("code")}
+        logger.info("抓取 %d 只基金，阈值过滤后 %d 只", len(all_items), len(filtered))
+
+        # 3. 安全替换：先入库新数据，再删除不再满足阈值的旧基金
         db = SessionLocal()
         total_upserted = 0
         try:
-            for ft in FundService.FUND_TYPES:
-                def _on_batch_factory(ft_name):
-                    def _cb(items):
-                        nonlocal total_upserted
-                        if items:
-                            cnt = FundService.upsert_funds(db, items)
-                            total_upserted += cnt
-                    return _cb
-                try:
-                    items = await sc.fetch_all_streaming(ft, max_pages=60, on_batch=_on_batch_factory(ft))
-                    logger.info("[%s] 流式抓取完成，共 %d 条", ft, len(items))
-                except Exception as e:
-                    logger.error("抓取 %s 类型基金失败: %s", ft, e)
-        finally:
-            db.close()
-        await sc.close()
+            total_upserted = FundService.upsert_funds(db, filtered)
 
-        # 重算主力
-        db = SessionLocal()
-        try:
-            main_count = FundService.recalc_main_flag(db, min_scale, min_ret_1y)
+            # 删除不再满足阈值的旧基金（新数据已入库，安全清除）
+            if new_codes:
+                old_funds = db.query(Fund).filter(~Fund.code.in_(new_codes)).all()
+                for f in old_funds:
+                    db.delete(f)
+                if old_funds:
+                    logger.info("清除 %d 只不再满足阈值的旧基金", len(old_funds))
+                    db.commit()
         finally:
             db.close()
 
-        # 抓全部基金最新季报持仓（不再限于 is_main=1）
+        # 4. 抓持仓（用 fund 表中的全部基金）
         holdings_count = await FundService.refresh_all_holdings()
 
         return {
             "funds_upserted": total_upserted,
-            "main_count": main_count,
+            "funds_in_db": len(new_codes),
             "holdings_upserted": holdings_count,
         }
 

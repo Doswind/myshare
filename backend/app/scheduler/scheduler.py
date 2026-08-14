@@ -69,12 +69,9 @@ def job_funds_full():
 
 
 def job_fund_nav():
-    """每日 20:30 抓基金正式净值 + 基金详情（评级/经理）
+    """每日抓基金净值 + 详情（评级/经理）
 
-    合并原因：
-    - 净值更新后紧接着刷详情，逻辑连贯
-    - 都是交易日晚上跑，用户少配一个任务
-    - fund_details 抓的是主力基金详情（500 只），3-5 分钟即可完成
+    只刷新 fund 表已有基金的净值和详情，不抓基金列表/持仓（那些由 funds_full 每周抓）。
     """
     log_id = _new_log("sched_fund_nav", "定时：基金净值+详情")
     try:
@@ -85,20 +82,21 @@ def job_fund_nav():
             try:
                 db = SessionLocal()
                 try:
-                    # 阶段 1：抓基金列表（净值/规模/收益率）
+                    # 阶段 1：抓基金净值（对 fund 表已有的基金 upsert 最新净值数据）
                     total = 0
                     for ft in FundService.FUND_TYPES:
                         items = await sc.fetch_all_streaming(ft, max_pages=60, on_batch=None)
-                        cnt = FundService.upsert_funds(db, items)
+                        # 只 upsert fund 表已有的基金（新增基金由 funds_full 任务处理）
+                        from app.models.fund import Fund
+                        existing_codes = set(c for (c,) in db.query(Fund.code).all())
+                        filtered = [it for it in items if it.get("code") in existing_codes]
+                        cnt = FundService.upsert_funds(db, filtered)
                         total += cnt
-                    FundService.recalc_main_flag(db)
-                    logger.info("[sched] fund_nav: 净值抓取完成，%d funds", total)
+                    logger.info("[sched] fund_nav: 净值刷新完成，%d funds", total)
 
-                    # 阶段 2：抓主力基金详情（评级/经理/管理人）
-                    from app.models.fund import Fund
-                    codes = [c for (c,) in db.query(Fund.code).filter(Fund.is_main == 1).all()]
-                    detail_result = await FundService.refresh_fund_details(codes)
-                    logger.info("[sched] fund_nav: 详情抓取完成，%d funds",
+                    # 阶段 2：抓全部基金详情（评级/经理/管理人）
+                    detail_result = await FundService.refresh_fund_details()
+                    logger.info("[sched] fund_nav: 详情刷新完成，%d funds",
                                 detail_result.get("updated", 0))
                     return {"funds_upserted": total, "details_updated": detail_result.get("updated", 0)}
                 finally:
