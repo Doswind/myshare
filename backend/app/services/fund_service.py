@@ -164,13 +164,14 @@ class FundService:
 
     @staticmethod
     async def refresh_all_funds(min_scale: Optional[float] = None, min_ret_1y: Optional[float] = None) -> Dict:
-        """全量抓取基金列表 → 按阈值过滤入库 → 抓持仓
+        """全量抓取基金列表 → 按阈值过滤 → 抓持仓 → 只入库有持仓的基金
 
         流程：
         1. 抓取东方财富全部基金（3类型，每类最多60页）
         2. 按阈值过滤（scale_yi >= min_scale AND ret_1y >= min_ret_1y）
-        3. 先抓到新数据后，清除 fund 表中不再满足阈值的旧基金
-        4. 抓取 fund 表中全部基金的持仓
+        3. 抓持仓，记录哪些基金有持仓数据
+        4. 只入库有持仓的基金（债基/货基等无股票持仓的不入库）
+        5. 清除 fund 表中不再有持仓的旧基金
         """
         from app.database import SessionLocal
         ms = min_scale if min_scale is not None else settings.default_min_scale
@@ -179,7 +180,7 @@ class FundService:
 
         sc = EastmoneyFundsScraper()
 
-        # 1. 流式抓取全部基金，先存到内存
+        # 1. 抓取全部基金到内存
         all_items: List[Dict] = []
         for ft in FundService.FUND_TYPES:
             try:
@@ -199,33 +200,106 @@ class FundService:
             it for it in all_items
             if (it.get("scale_yi") or 0) >= ms and (it.get("ret_1y") or 0) >= mr
         ]
-        new_codes = {it["code"] for it in filtered if it.get("code")}
+        filtered_codes = {it["code"] for it in filtered if it.get("code")}
         logger.info("抓取 %d 只基金，阈值过滤后 %d 只", len(all_items), len(filtered))
 
-        # 3. 安全替换：先入库新数据，再删除不再满足阈值的旧基金
+        # 3. 抓持仓（直接传入过滤后的基金代码，不入库基金）
+        fh = FundHoldingsScraper()
+        year, season = FundHoldingsScraper.latest_season()
+        report_date = f"{year}-{season * 3:02d}"
+        logger.info("持仓抓取季节: %s Q%d (%s)", year, season, report_date)
+
+        # 增量：查已有当季持仓的基金，跳过
+        db = SessionLocal()
+        try:
+            existing_codes = set(
+                c for (c,) in db.query(FundHolding.fund_code)
+                .filter(FundHolding.report_date == report_date)
+                .distinct()
+                .all()
+            )
+        finally:
+            db.close()
+
+        to_fetch = [c for c in filtered_codes if c not in existing_codes]
+        skipped = len(filtered_codes) - len(to_fetch)
+        logger.info("持仓抓取: 过滤后 %d 只，已抓 %d 只（跳过），需抓 %d 只",
+                    len(filtered_codes), skipped, len(to_fetch))
+
+        # 有持仓的基金代码集合
+        funds_with_holdings: set = set(existing_codes & filtered_codes)
+        total_holdings = 0
+
+        if to_fetch:
+            try:
+                batch_size = 500
+                concurrency = 30
+                total_batches = (len(to_fetch) + batch_size - 1) // batch_size
+                for i in range(0, len(to_fetch), batch_size):
+                    batch = to_fetch[i:i + batch_size]
+                    batch_num = i // batch_size + 1
+                    holdings_map = await fh.fetch_many(batch, year, season, concurrency=concurrency)
+
+                    all_rows = []
+                    for code, rows in holdings_map.items():
+                        if rows:  # 有持仓数据的基金
+                            funds_with_holdings.add(code)
+                        all_rows.extend(rows)
+
+                    # 入库持仓 + 同步股票
+                    db = SessionLocal()
+                    try:
+                        cnt = FundService.upsert_holdings(db, all_rows)
+                        total_holdings += cnt
+                        stock_codes = {r["stock_code"] for r in all_rows if r.get("stock_code")}
+                        for sc_code in stock_codes:
+                            if not sc_code or len(sc_code) != 6:
+                                continue
+                            s = db.query(Stock).filter(Stock.code == sc_code).first()
+                            if not s:
+                                market = 1 if sc_code.startswith("6") else 0
+                                s = Stock(code=sc_code, name="", market=market, secid=f"{market}.{sc_code}")
+                                db.add(s)
+                        db.commit()
+                    finally:
+                        db.close()
+
+                    logger.info("持仓抓取进度: %d/%d 批，本批 %d 条持仓",
+                                batch_num, total_batches, len(all_rows))
+            except Exception as e:
+                logger.error("持仓抓取失败: %s", e)
+            finally:
+                await fh.close()
+
+        logger.info("持仓抓取完成: %d 只基金有持仓（过滤后 %d 只，无持仓 %d 只）",
+                    len(funds_with_holdings), len(filtered_codes),
+                    len(filtered_codes) - len(funds_with_holdings))
+
+        # 4. 只入库有持仓的基金
+        funds_to_store = [it for it in filtered if it.get("code") in funds_with_holdings]
+        new_codes = {it["code"] for it in funds_to_store if it.get("code")}
+        logger.info("入库基金: %d 只（有持仓）", len(funds_to_store))
+
         db = SessionLocal()
         total_upserted = 0
         try:
-            total_upserted = FundService.upsert_funds(db, filtered)
+            total_upserted = FundService.upsert_funds(db, funds_to_store)
 
-            # 删除不再满足阈值的旧基金（新数据已入库，安全清除）
+            # 5. 清除不再有持仓的旧基金
             if new_codes:
                 old_funds = db.query(Fund).filter(~Fund.code.in_(new_codes)).all()
                 for f in old_funds:
                     db.delete(f)
                 if old_funds:
-                    logger.info("清除 %d 只不再满足阈值的旧基金", len(old_funds))
+                    logger.info("清除 %d 只不再有持仓的旧基金", len(old_funds))
                     db.commit()
         finally:
             db.close()
 
-        # 4. 抓持仓（用 fund 表中的全部基金）
-        holdings_count = await FundService.refresh_all_holdings()
-
         return {
             "funds_upserted": total_upserted,
             "funds_in_db": len(new_codes),
-            "holdings_upserted": holdings_count,
+            "holdings_upserted": total_holdings,
         }
 
     @staticmethod

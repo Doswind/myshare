@@ -249,29 +249,6 @@ export default function SettingsPage() {
             )}
           </tbody>
         </table>
-        {jobTotal > jobPageSize && (
-          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 text-[11px] text-slate-500">
-            <span>
-              第 {jobPage} / {jobTotalPages} 页 · 共 {jobTotal} 条
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setJobPage((p) => Math.max(1, p - 1))}
-                disabled={jobPage <= 1}
-                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-3 h-3" /> 上一页
-              </button>
-              <button
-                onClick={() => setJobPage((p) => Math.min(jobTotalPages, p + 1))}
-                disabled={jobPage >= jobTotalPages}
-                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                下一页 <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* 抓取策略配置 */}
@@ -480,6 +457,29 @@ export default function SettingsPage() {
             })}
           </tbody>
         </table>
+        {jobTotal > jobPageSize && (
+          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 text-[11px] text-slate-500">
+            <span>
+              第 {jobPage} / {jobTotalPages} 页 · 共 {jobTotal} 条
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setJobPage((p) => Math.max(1, p - 1))}
+                disabled={jobPage <= 1}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-3 h-3" /> 上一页
+              </button>
+              <button
+                onClick={() => setJobPage((p) => Math.min(jobTotalPages, p + 1))}
+                disabled={jobPage >= jobTotalPages}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                下一页 <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {toast && (

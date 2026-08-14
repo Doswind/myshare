@@ -5,6 +5,7 @@ import { useFilterStore } from "@/store/filterStore";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNavigate } from "react-router-dom";
 import { RangeSlider } from "@/components/common/RangeSlider";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const TYPES = [
   { value: "", label: "全部" },
@@ -17,32 +18,38 @@ export default function FundListPage() {
   const nav = useNavigate();
   const { minScale, minRet1y, setMinScale, setMinRet1y } = useFilterStore();
   const [type, setType] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(50);
   const dMinScale = useDebounce(minScale, 300);
   const dMinRet1y = useDebounce(minRet1y, 300);
 
+  // 筛选条件变化时重置到第一页
   const { data, isLoading } = useQuery({
-    queryKey: ["funds", dMinScale, dMinRet1y, type],
+    queryKey: ["funds", dMinScale, dMinRet1y, type, page, pageSize],
     queryFn: () =>
       fetchFunds({
         min_scale: dMinScale,
         min_ret_1y: dMinRet1y,
         fund_type: type || undefined,
-        page: 1,
-        page_size: 100,
+        page,
+        page_size: pageSize,
       }),
   });
+
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="space-y-2.5">
       <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-x-4 gap-y-2 rounded-md border border-slate-200 bg-white px-3 py-2">
-        <RangeSlider label="规模 ≥" value={minScale} min={1} max={500} suffix="亿" onChange={setMinScale} />
-        <RangeSlider label="1年收益 ≥" value={minRet1y} min={-30} max={100} suffix="%" onChange={setMinRet1y} />
+        <RangeSlider label="规模 ≥" value={minScale} min={1} max={500} suffix="亿" onChange={(v) => { setMinScale(v); setPage(1); }} />
+        <RangeSlider label="1年收益 ≥" value={minRet1y} min={-30} max={100} suffix="%" onChange={(v) => { setMinRet1y(v); setPage(1); }} />
         <div className="flex items-center gap-1.5 w-full sm:w-auto">
           <span className="text-[11px] text-slate-500">类型</span>
           {TYPES.map((t) => (
             <button
               key={t.value}
-              onClick={() => setType(t.value)}
+              onClick={() => { setType(t.value); setPage(1); }}
               className={`px-2 py-0.5 text-[12px] rounded border ${
                 type === t.value
                   ? "bg-slate-700 text-white border-slate-700"
@@ -55,7 +62,12 @@ export default function FundListPage() {
         </div>
       </div>
 
-      <div className="text-[11px] text-slate-500 px-1">共 {data?.total ?? 0} 只</div>
+      <div className="text-[11px] text-slate-500 px-1 flex items-center justify-between">
+        <span>共 {total} 只</span>
+        {total > pageSize && (
+          <span>第 {page} / {totalPages} 页</span>
+        )}
+      </div>
 
       <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
         {/* PC 端表格 */}
@@ -158,6 +170,27 @@ export default function FundListPage() {
             </div>
           ))}
         </div>
+        {total > pageSize && (
+          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 text-[11px] text-slate-500">
+            <span>第 {page} / {totalPages} 页 · 共 {total} 只</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-3 h-3" /> 上一页
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                下一页 <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
