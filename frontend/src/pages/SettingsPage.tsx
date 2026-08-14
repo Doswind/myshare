@@ -617,6 +617,8 @@ function RefreshButton({
 }
 
 // ---------- 抓取策略配置子组件 ----------
+const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
 function CrawlStrategySection({
   configs,
   draft,
@@ -656,7 +658,7 @@ function CrawlStrategySection({
           <div className="text-[13px] font-semibold text-slate-800">抓取策略配置</div>
           <div className="text-[10px] text-slate-400 mt-0.5">
             修改后保存即可热重载调度器，无需重启服务。
-            <span className="ml-2">关闭=不调度 · daily=每天定时 · interval=按周期（可设交易窗口）</span>
+            <span className="ml-2">关闭=不调度 · daily=每天定时 · weekly=每周定时 · interval=按周期（可设交易窗口）</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -685,7 +687,7 @@ function CrawlStrategySection({
               <th className="text-left py-1.5 px-2 font-normal w-8">开</th>
               <th className="text-left py-1.5 px-2 font-normal">任务</th>
               <th className="text-left py-1.5 px-2 font-normal w-24">类型</th>
-              <th className="text-left py-1.5 px-2 font-normal w-32">频率/时间</th>
+              <th className="text-left py-1.5 px-2 font-normal w-48">频率/时间</th>
               <th className="text-left py-1.5 px-2 font-normal w-40">运行窗口</th>
               <th className="text-left py-1.5 px-2 font-normal w-16">仅交易日</th>
               <th className="text-left py-1.5 px-2 font-normal">说明</th>
@@ -728,6 +730,7 @@ function CrawlStrategySection({
                     >
                       <option value="off">关闭</option>
                       <option value="daily">每天定时</option>
+                      <option value="weekly">每周定时</option>
                       <option value="interval">按周期</option>
                     </select>
                   </td>
@@ -741,6 +744,28 @@ function CrawlStrategySection({
                         disabled={!c.enabled}
                         className="w-24 px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
                       />
+                    )}
+                    {c.cron_type === "weekly" && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-slate-500 text-[11px]">每</span>
+                        <select
+                          value={c.day_of_week ?? 0}
+                          onChange={(e) => updateField(c.job_key, "day_of_week", Number(e.target.value))}
+                          disabled={!c.enabled}
+                          className="px-1.5 py-0.5 border border-slate-300 rounded text-[12px] disabled:bg-slate-50 disabled:text-slate-400"
+                        >
+                          {WEEKDAYS.map((w, i) => (
+                            <option key={i} value={i}>{w}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="time"
+                          value={c.time_of_day}
+                          onChange={(e) => updateField(c.job_key, "time_of_day", e.target.value)}
+                          disabled={!c.enabled}
+                          className="w-[74px] px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                        />
+                      </div>
                     )}
                     {c.cron_type === "interval" && (
                       <div className="flex items-center gap-1">

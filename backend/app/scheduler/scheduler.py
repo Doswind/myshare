@@ -216,6 +216,15 @@ def _build_trigger(cfg: CrawlConfig):
     if cfg.cron_type == "daily":
         t = _parse_hhmm(cfg.time_of_day) or dtime(17, 0)
         return CronTrigger(hour=t.hour, minute=t.minute, timezone="Asia/Shanghai")
+    if cfg.cron_type == "weekly":
+        t = _parse_hhmm(cfg.time_of_day) or dtime(17, 0)
+        dow = cfg.day_of_week if cfg.day_of_week is not None else 0
+        return CronTrigger(
+            day_of_week=max(0, min(6, dow)),
+            hour=t.hour,
+            minute=t.minute,
+            timezone="Asia/Shanghai",
+        )
     if cfg.cron_type == "interval":
         return IntervalTrigger(minutes=max(1, cfg.interval_minutes or 5), timezone="Asia/Shanghai")
     return None

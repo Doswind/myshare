@@ -19,12 +19,13 @@ DEFAULTS: List[Dict[str, Any]] = [
     {
         "job_key": "funds_full",
         "display_name": "基金列表+持仓",
-        "cron_type": "daily",
+        "cron_type": "weekly",
+        "day_of_week": 0,
         "time_of_day": "21:30",
         "trading_only": True,
         "trading_only_locked": True,
-        "enabled": False,  # 默认关闭，改为每周手动触发或通过 cron_type=interval + interval_minutes=10080(7天) 实现
-        "description": f"全量抓基金列表(按阈值过滤) + 持仓。基金季报数据变化慢，建议每周抓一次。{LOCKED_REASON}",
+        "enabled": True,
+        "description": f"全量抓基金列表(按阈值过滤) + 持仓，每周一 21:30 执行；若当日为节假日则本周跳过（基金季报数据变化慢，影响小）。{LOCKED_REASON}",
     },
     {
         "job_key": "fund_nav",
@@ -73,7 +74,7 @@ DEFAULTS: List[Dict[str, Any]] = [
 
 # 用户可编辑的字段（locked 字段不允许通过 API 改）
 EDITABLE_FIELDS = {
-    "display_name", "cron_type", "interval_minutes", "time_of_day",
+    "display_name", "cron_type", "interval_minutes", "time_of_day", "day_of_week",
     "window_start", "window_end", "trading_only", "enabled", "description",
 }
 
@@ -102,7 +103,7 @@ class CrawlConfigService:
                     # 把 defaults 的关键字段同步到已存在行（处理历史 DB 升级）
                     row = existing[key]
                     for k in ("trading_only", "trading_only_locked", "cron_type", "time_of_day",
-                              "interval_minutes", "window_start", "window_end",
+                              "day_of_week", "interval_minutes", "window_start", "window_end",
                               "display_name", "description"):
                         if k in d and getattr(row, k) != d[k]:
                             setattr(row, k, d[k])
