@@ -19,8 +19,8 @@ from app.utils.job_guard import JobGuard
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# 任务级超时：30 分钟（覆盖最大的「刷新基金」全流程：~5000 基金流式 + 500 主力持仓并发）
-JOB_TIMEOUT_SECONDS = 30 * 60
+# 任务级超时：60 分钟（全量持仓抓取 7100+ 基金，每批 500 并发 15，约 15-30 分钟）
+JOB_TIMEOUT_SECONDS = 60 * 60
 
 
 async def _run_with_log_id(job_id: str, job_name: str, coro_factory, log_id: int):
@@ -39,6 +39,7 @@ async def _run_with_log_id(job_id: str, job_name: str, coro_factory, log_id: int
         log.items_processed = (
             result.get("snapshots")
             or result.get("funds_upserted")
+            or result.get("holdings_upserted")
             or result.get("sectors")
             or result.get("stock_mappings")
             or 0
@@ -119,13 +120,25 @@ async def list_scheduled():
 
 @router.post("/funds/refresh")
 async def trigger_fund_refresh(background: BackgroundTasks):
-    """手动触发：刷新基金 + 持仓"""
+    """手动触发：刷新基金 + 全量持仓"""
     _acquire_or_fail("manual_funds")
     async def _task():
         return await FundService.refresh_all_funds()
-    log_id = await _log_start("manual_funds", "手动刷新基金")
-    asyncio.create_task(_run_with_log_id("manual_funds", "手动刷新基金", _task, log_id))
+    log_id = await _log_start("manual_funds", "手动刷新基金+持仓")
+    asyncio.create_task(_run_with_log_id("manual_funds", "手动刷新基金+持仓", _task, log_id))
     return {"status": "started", "job_id": "manual_funds", "log_id": log_id}
+
+
+@router.post("/holdings/refresh")
+async def trigger_holdings_refresh(background: BackgroundTasks):
+    """手动触发：单独抓全部基金重仓持仓（不刷新基金列表）"""
+    _acquire_or_fail("manual_holdings")
+    async def _task():
+        count = await FundService.refresh_all_holdings()
+        return {"holdings_upserted": count}
+    log_id = await _log_start("manual_holdings", "手动刷新全部持仓")
+    asyncio.create_task(_run_with_log_id("manual_holdings", "手动刷新全部持仓", _task, log_id))
+    return {"status": "started", "job_id": "manual_holdings", "log_id": log_id}
 
 
 @router.post("/quotes/refresh")

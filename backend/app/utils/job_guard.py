@@ -26,6 +26,7 @@ class JobGuard:
     COOLDOWN_SECONDS = {
         "manual_funds": 10 * 60,
         "manual_fund_nav": 10 * 60,  # 基金净值+详情（合并后）
+        "manual_holdings": 10 * 60,  # 全量持仓抓取（7100+基金，耗时较长）
         "manual_quotes": 60,
         "manual_sectors": 60,
         "manual_stock_details": 30,

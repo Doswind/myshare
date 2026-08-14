@@ -58,7 +58,7 @@ def _run_async(coro):
 
 
 def job_funds_full():
-    log_id = _new_log("sched_funds_full", "定时：基金列表+持仓")
+    log_id = _new_log("sched_funds_full", "定时：基金列表+全量持仓")
     try:
         result = _run_async(FundService.refresh_all_funds())
         _finish_log(log_id, "success", items=result.get("funds_upserted", 0))

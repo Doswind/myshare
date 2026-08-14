@@ -163,10 +163,9 @@ class FundService:
 
     @staticmethod
     async def refresh_all_funds(min_scale: Optional[float] = None, min_ret_1y: Optional[float] = None) -> Dict:
-        """拉所有基金 + 重算主力 + 抓持仓（流式，分批入库）"""
+        """拉所有基金 + 重算主力 + 抓全部基金持仓（流式，分批入库）"""
         from app.database import SessionLocal
         sc = EastmoneyFundsScraper()
-        fh = FundHoldingsScraper()
 
         # 用流式抓取，每页直接入库
         db = SessionLocal()
@@ -196,26 +195,60 @@ class FundService:
         finally:
             db.close()
 
-        # 抓主力基金最新季报持仓
+        # 抓全部基金最新季报持仓（不再限于 is_main=1）
+        holdings_count = await FundService.refresh_all_holdings()
+
+        return {
+            "funds_upserted": total_upserted,
+            "main_count": main_count,
+            "holdings_upserted": holdings_count,
+        }
+
+    @staticmethod
+    async def refresh_all_holdings(concurrency: int = 15, batch_size: int = 500) -> int:
+        """单独抓全部基金最新季报持仓（分批并发，分批入库）
+
+        - concurrency: 单批内的并发请求数
+        - batch_size: 每批处理的基金数量（每批完成后入库一次，降低内存峰值）
+        """
+        from app.database import SessionLocal
+        fh = FundHoldingsScraper()
         year, season = FundHoldingsScraper.latest_season()
+        logger.info("持仓抓取季节: %s Q%d (%d-%02d)", year, season, year, season * 3)
+
+        # 取全部基金代码
         db = SessionLocal()
         try:
-            main_codes = [c for (c,) in db.query(Fund.code).filter(Fund.is_main == 1).all()]
+            all_codes = [c for (c,) in db.query(Fund.code).all()]
         finally:
             db.close()
 
-        holdings_count = 0
-        if main_codes:
-            logger.info("开始抓 %d 只主力基金的持仓", len(main_codes))
-            try:
-                holdings_map = await fh.fetch_many(main_codes, year, season, concurrency=8)
+        if not all_codes:
+            logger.warning("fund 表为空，跳过持仓抓取")
+            await fh.close()
+            return 0
+
+        total_holdings = 0
+        total_batches = (len(all_codes) + batch_size - 1) // batch_size
+        logger.info("开始抓 %d 只基金的持仓，分 %d 批（每批 %d，并发 %d）",
+                    len(all_codes), total_batches, batch_size, concurrency)
+
+        try:
+            for i in range(0, len(all_codes), batch_size):
+                batch = all_codes[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                holdings_map = await fh.fetch_many(batch, year, season, concurrency=concurrency)
+
                 all_rows = []
                 for code, rows in holdings_map.items():
                     all_rows.extend(rows)
-                # 同步股票基础信息
+
+                # 入库 + 同步股票基础信息
                 db = SessionLocal()
                 try:
-                    holdings_count = FundService.upsert_holdings(db, all_rows)
+                    cnt = FundService.upsert_holdings(db, all_rows)
+                    total_holdings += cnt
+
                     stock_codes = {r["stock_code"] for r in all_rows if r.get("stock_code")}
                     for sc_code in stock_codes:
                         if not sc_code or len(sc_code) != 6:
@@ -228,18 +261,17 @@ class FundService:
                     db.commit()
                 finally:
                     db.close()
-            except Exception as e:
-                logger.error("并发抓取持仓失败: %s", e)
+
+                logger.info("持仓抓取进度: %d/%d 批 (基金 %d-%d/%d)，本批 %d 条持仓",
+                            batch_num, total_batches, i + 1, min(i + batch_size, len(all_codes)),
+                            len(all_codes), len(all_rows))
+        except Exception as e:
+            logger.error("持仓抓取失败: %s", e)
+        finally:
             await fh.close()
 
-        return {
-            "funds_upserted": total_upserted,
-            "main_count": main_count,
-            "main_funds_to_fetch": len(main_codes),
-            "holdings_upserted": holdings_count,
-            "year": year,
-            "season": season,
-        }
+        logger.info("持仓抓取完成: 共 %d 条持仓（%d 只基金）", total_holdings, len(all_codes))
+        return total_holdings
 
     @staticmethod
     async def refresh_fund_details(codes: Optional[List[str]] = None, concurrency: int = 6) -> Dict[str, int]:

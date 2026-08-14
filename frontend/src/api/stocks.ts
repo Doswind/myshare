@@ -33,6 +33,9 @@ export const fetchRunningJobs = () =>
 export const triggerFundRefresh = () =>
   client.post("/jobs/funds/refresh").then((r) => r.data);
 
+export const triggerHoldingsRefresh = () =>
+  client.post("/jobs/holdings/refresh").then((r) => r.data);
+
 export const triggerQuoteRefresh = (only_holdings = true) =>
   client.post("/jobs/quotes/refresh", null, { params: { only_holdings } }).then((r) => r.data);
 

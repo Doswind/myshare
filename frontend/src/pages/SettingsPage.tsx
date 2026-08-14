@@ -6,6 +6,7 @@ import {
   fetchScheduledJobs,
   fetchRunningJobs,
   triggerFundRefresh,
+  triggerHoldingsRefresh,
   triggerQuoteRefresh,
   triggerSectorRefresh,
 } from "@/api/stocks";
@@ -153,10 +154,10 @@ export default function SettingsPage() {
       {/* 抓取触发 */}
       <div className="rounded-md border border-slate-200 bg-white p-3">
         <div className="text-[13px] font-semibold text-slate-800 mb-2">手动抓取</div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <RefreshButton
             label="基金+持仓"
-            hint="约 5–10 分钟"
+            hint="约 20–30 分钟"
             busy={busy === "funds"}
             disabled={busy !== null || cooldown("funds") > 0 || isInLock("manual_funds")}
             cooldownSec={cooldown("funds")}
@@ -165,7 +166,21 @@ export default function SettingsPage() {
               "funds",
               triggerFundRefresh,
               "基金+持仓抓取",
-              "将刷新全量基金列表（约 5000+ 只）并拉取主力基金最新季报持仓。\n首次或重置后可能耗时 10–15 分钟。\n完成后 10 分钟内不允许再次触发。",
+              "将刷新全量基金列表（约 7100+ 只）并拉取全部基金最新季报重仓持仓。\n耗时约 20–30 分钟，完成后 10 分钟内不允许再次触发。",
+            )}
+          />
+          <RefreshButton
+            label="仅刷新持仓"
+            hint="约 15–25 分钟"
+            busy={busy === "holdings"}
+            disabled={busy !== null || cooldown("holdings") > 0 || isInLock("manual_holdings")}
+            cooldownSec={cooldown("holdings")}
+            inLock={isInLock("manual_holdings")}
+            onClick={() => confirmAndRun(
+              "holdings",
+              triggerHoldingsRefresh,
+              "持仓抓取",
+              "将拉取全部基金（7100+ 只）最新季报重仓持仓，不刷新基金列表。\n耗时约 15–25 分钟，完成后 10 分钟内不允许再次触发。",
             )}
           />
           <RefreshButton
@@ -198,7 +213,8 @@ export default function SettingsPage() {
           />
         </div>
         <p className="text-[10px] text-slate-400 mt-2">
-          首次使用请先抓取基金 → 行业 → 行情。完整流程约 10–15 分钟。完成后到「持仓看板」查看。
+          首次使用请先抓「基金+持仓」→ 行业 → 行情。完整流程约 20–30 分钟。完成后到「持仓看板」查看。
+          <span className="ml-1">「仅刷新持仓」适用于基金列表已是最新、只需补充持仓数据的场景。</span>
         </p>
       </div>
 
@@ -326,7 +342,7 @@ export default function SettingsPage() {
           </button>
         </div>
         <p className="text-[10px] text-slate-400 mt-2">
-          阈值越低 → 抓取的基金/股票越多（规模 ≥5亿 且 近1年 ≥5% 约 500+ 只基金）。修改后下次刷新基金生效。
+          阈值用于持仓看板的基金筛选（规模 ≥5亿 且 近1年 ≥5% 约 500+ 只主力基金）。持仓数据已覆盖全部 7100+ 只基金，调整阈值只会影响看板中参与聚合的基金范围。
         </p>
         <p className="text-[10px] text-slate-400 mt-1">
           自选股管理已迁移到「股票列表 → 我的自选」Tab。
