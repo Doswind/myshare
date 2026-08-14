@@ -7,8 +7,8 @@ import { useDebounce } from "@/hooks/useDebounce";
 
 export function FilterBar() {
   const {
-    minScale, minRet1y, priceMin, priceMax, industry, sortBy,
-    setMinScale, setMinRet1y, setPriceRange, setIndustry, setSortBy, reset,
+    minScale, minRet1y, priceMin, priceMax, industry, sortBy, fundedOnly,
+    setMinScale, setMinRet1y, setPriceRange, setIndustry, setSortBy, setFundedOnly, reset,
   } = useFilterStore();
 
   const { data: industries = [] } = useQuery({
@@ -81,6 +81,15 @@ export function FilterBar() {
             <option value="total_market_value">持仓市值</option>
           </select>
         </div>
+        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={fundedOnly}
+            onChange={(e) => setFundedOnly(e.target.checked)}
+            className="w-3.5 h-3.5 accent-slate-700"
+          />
+          <span className="text-[11px] text-slate-600 whitespace-nowrap">仅看重仓股</span>
+        </label>
         <button
           onClick={reset}
           className="rounded border border-slate-300 px-2 py-0.5 text-[12px] text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-1 justify-center sm:justify-start"

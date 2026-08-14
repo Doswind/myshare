@@ -23,15 +23,16 @@ async def holdings_by_sector(
         description="板块过滤（多选）：沪主板 / 科创板 / 深主板 / 创业板 / 北交所",
     ),
     sort_by: str = Query("fund_count", regex="^(fund_count|change_pct|total_market_value)$"),
+    funded_only: bool = Query(False, description="仅返回被主力基金重仓的股票"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=2000),
     db: Session = Depends(get_db),
 ):
     """
-    核心接口：按行业分组的、来自主力基金重仓的股票列表
-    支持股票价格区间 / 行业筛选 / 板块筛选 / 排序
+    核心接口：按行业分组的股票列表
+    - 默认展示 stock 表所有股票（含无重仓）
+    - funded_only=true 时仅返回被主力基金重仓的股票
     """
-    # 校验 board 参数
     if boards:
         invalid = [b for b in boards if b not in VALID_BOARDS]
         if invalid:
@@ -51,6 +52,7 @@ async def holdings_by_sector(
         page=page,
         page_size=page_size,
         sort_by=sort_by,
+        funded_only=funded_only,
     )
 
 

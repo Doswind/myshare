@@ -8,12 +8,14 @@ interface FilterState {
   priceMax: number | null;
   industry: string | null;
   sortBy: "fund_count" | "change_pct" | "total_market_value";
+  fundedOnly: boolean;
 
   setMinScale: (v: number) => void;
   setMinRet1y: (v: number) => void;
   setPriceRange: (min: number | null, max: number | null) => void;
   setIndustry: (v: string | null) => void;
   setSortBy: (v: FilterState["sortBy"]) => void;
+  setFundedOnly: (v: boolean) => void;
 
   hydrate: (data: FilterDefaults) => void;
   reset: () => void;
@@ -26,6 +28,7 @@ const DEFAULTS = {
   priceMax: null as number | null,
   industry: null as string | null,
   sortBy: "fund_count" as const,
+  fundedOnly: false as const,
 };
 
 export const useFilterStore = create<FilterState>((set) => ({
@@ -35,6 +38,7 @@ export const useFilterStore = create<FilterState>((set) => ({
   setPriceRange: (min, max) => set({ priceMin: min, priceMax: max }),
   setIndustry: (v) => set({ industry: v }),
   setSortBy: (v) => set({ sortBy: v }),
+  setFundedOnly: (v) => set({ fundedOnly: v }),
   hydrate: (data) =>
     set({
       minScale: data.min_scale,

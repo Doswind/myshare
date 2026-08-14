@@ -64,6 +64,7 @@ class AggregationService:
         page: int = 1,
         page_size: int = 100,
         sort_by: str = "fund_count",
+        funded_only: bool = False,
     ) -> Dict[str, Any]:
         """
         返回结构：
@@ -202,6 +203,10 @@ class AggregationService:
             stock_list.sort(key=lambda x: -(x.get("change_pct") or -9999))
         elif sort_by == "total_market_value":
             stock_list.sort(key=lambda x: -(x.get("total_market_value") or 0))
+
+        # 7.5 funded_only: 过滤掉无基金重仓的股票
+        if funded_only:
+            stock_list = [s for s in stock_list if (s.get("fund_count") or 0) > 0]
 
         # 8. 按行业分组
         grouped = defaultdict(list)

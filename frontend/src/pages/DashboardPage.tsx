@@ -35,7 +35,7 @@ function formatError(e: unknown): string {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const {
-    minScale, minRet1y, priceMin, priceMax, industry, sortBy, hydrate,
+    minScale, minRet1y, priceMin, priceMax, industry, sortBy, fundedOnly, hydrate,
   } = useFilterStore();
 
   // 初始化：拉一次后端默认
@@ -57,6 +57,7 @@ export default function DashboardPage() {
     price_min: dPriceMin ?? undefined,
     price_max: dPriceMax ?? undefined,
     sort_by: sortBy,
+    funded_only: fundedOnly,
     page: 1,
     page_size: 1000,
   };
