@@ -16,7 +16,7 @@ import {
   resetCrawlConfigs,
 } from "@/api/crawlConfig";
 import type { CrawlConfig } from "@/types/api";
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock, Clock } from "lucide-react";
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2, Save, RotateCcw, Lock, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { ConfirmDialog, type ConfirmOptions } from "@/components/common/ConfirmDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { cleanupStuckJobs } from "@/api/stocks";
@@ -29,11 +29,16 @@ export default function SettingsPage() {
     queryFn: fetchScheduledJobs,
     refetchInterval: 30_000,
   });
-  const { data: jobs = [] } = useQuery({
-    queryKey: ["job-logs"],
-    queryFn: fetchJobs,
+  const [jobPage, setJobPage] = useState(1);
+  const [jobPageSize] = useState(20);
+  const { data: jobsData } = useQuery({
+    queryKey: ["job-logs", jobPage, jobPageSize],
+    queryFn: () => fetchJobs(jobPage, jobPageSize),
     refetchInterval: 10_000,
   });
+  const jobs = jobsData?.items ?? [];
+  const jobTotal = jobsData?.total ?? 0;
+  const jobTotalPages = Math.max(1, Math.ceil(jobTotal / jobPageSize));
   const { data: crawlConfigs = [] } = useQuery({
     queryKey: ["crawl-configs"],
     queryFn: fetchCrawlConfigs,
@@ -244,6 +249,29 @@ export default function SettingsPage() {
             )}
           </tbody>
         </table>
+        {jobTotal > jobPageSize && (
+          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 text-[11px] text-slate-500">
+            <span>
+              第 {jobPage} / {jobTotalPages} 页 · 共 {jobTotal} 条
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setJobPage((p) => Math.max(1, p - 1))}
+                disabled={jobPage <= 1}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-3 h-3" /> 上一页
+              </button>
+              <button
+                onClick={() => setJobPage((p) => Math.min(jobTotalPages, p + 1))}
+                disabled={jobPage >= jobTotalPages}
+                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                下一页 <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 抓取策略配置 */}
@@ -352,7 +380,7 @@ export default function SettingsPage() {
       {/* 任务日志 */}
       <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
         <div className="px-3 py-2 border-b border-slate-100 text-[12px] text-slate-700 font-medium flex items-center justify-between">
-          <span>最近任务日志（最新 50 条）</span>
+          <span>任务日志（共 {jobTotal} 条）</span>
           {isAdmin && (
             <button
               onClick={() => {
@@ -580,7 +608,7 @@ function RefreshButton({
     stateColor = "text-amber-600";
     Icon = Loader2;
   } else if (inLock) {
-    stateText = "已被其他任务占用";
+    stateText = "已有任务在执行中";
     stateColor = "text-amber-600";
   } else if (inCooldown) {
     stateText = `冷却中（${formatRemain(cooldownSec)}）`;

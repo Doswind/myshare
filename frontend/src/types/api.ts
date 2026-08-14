@@ -143,3 +143,22 @@ export interface CrawlConfig {
   description: string;
   updated_at?: string;
 }
+
+export interface AuditLog {
+  id: number;
+  user_id?: number | null;
+  username: string;
+  action: string;
+  target: string;
+  detail: string;
+  ip: string;
+  status: string;
+  created_at?: string;
+}
+
+export interface PaginatedResponse<T> {
+  total: number;
+  page: number;
+  page_size: number;
+  items: T[];
+}

@@ -4,9 +4,9 @@ import logging
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 from app.deps import get_db, get_current_user, require_admin
 from app.models.job_log import JobLog
@@ -92,10 +92,26 @@ def _acquire_or_fail(job_id: str) -> None:
 
 
 @router.get("")
-async def list_jobs(db: Session = Depends(get_db)):
-    """最近的 50 条任务日志"""
-    rows = db.query(JobLog).order_by(desc(JobLog.started_at)).limit(50).all()
-    return [r.to_dict() for r in rows]
+async def list_jobs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """任务日志（分页）"""
+    q = db.query(JobLog)
+    total = q.count()
+    rows = (
+        q.order_by(desc(JobLog.started_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [r.to_dict() for r in rows],
+    }
 
 
 @router.get("/scheduled")

@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutGrid, ListChecks, BarChart3, LogOut, User, ShieldCheck, Users, KeyRound, Settings, Activity } from "lucide-react";
+import { LayoutGrid, ListChecks, BarChart3, LogOut, User, ShieldCheck, Users, KeyRound, Settings, Activity, ScrollText } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import clsx from "clsx";
 import { useAuth } from "@/contexts/AuthContext";
@@ -120,6 +120,15 @@ export function AppShell() {
                       className="flex items-center gap-1.5 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
                     >
                       <KeyRound className="w-3 h-3" /> 角色权限
+                    </Link>
+                  )}
+                  {hasPermission("audit:view") && (
+                    <Link
+                      to="/admin/audit"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+                    >
+                      <ScrollText className="w-3 h-3" /> 审计日志
                     </Link>
                   )}
                   <button

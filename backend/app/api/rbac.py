@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_db, get_current_user, require_admin
 from app.core.security import decode_token
 from app.core.email import send_email, render_reset_password_email, render_welcome_email
-from app.models.rbac import User, Role, Permission
+from app.models.rbac import User, Role, Permission, AuditLog
 from app.services.rbac_service import AuthService, PasswordResetService, UserService, RoleService, write_audit
 from app.config import settings
 
@@ -19,6 +19,7 @@ auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 user_router = APIRouter(prefix="/api/users", tags=["users"])
 role_router = APIRouter(prefix="/api/roles", tags=["roles"])
 perm_router = APIRouter(prefix="/api/permissions", tags=["permissions"])
+audit_router = APIRouter(prefix="/api/audit", tags=["audit"])
 
 
 # ============== Schemas ==============
@@ -320,5 +321,41 @@ def list_permissions(
     return grouped
 
 
+# ============== Audit Log ==============
+
+@audit_router.get("")
+def list_audit_logs(
+    page: int = 1,
+    page_size: int = 20,
+    action: Optional[str] = None,
+    status: Optional[str] = None,
+    username: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """审计日志查询（分页 + 筛选，仅管理员）"""
+    q = db.query(AuditLog)
+    if action:
+        q = q.filter(AuditLog.action == action)
+    if status:
+        q = q.filter(AuditLog.status == status)
+    if username:
+        q = q.filter(AuditLog.username.ilike(f"%{username}%"))
+
+    total = q.count()
+    items = (
+        q.order_by(AuditLog.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [r.to_dict() for r in items],
+    }
+
+
 # 统一 router 导出
-routers = [auth_router, user_router, role_router, perm_router]
+routers = [auth_router, user_router, role_router, perm_router, audit_router]

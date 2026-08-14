@@ -13,6 +13,7 @@ import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import ProfilePage from "@/pages/ProfilePage";
 import UsersAdminPage from "@/pages/admin/UsersAdminPage";
 import RolesAdminPage from "@/pages/admin/RolesAdminPage";
+import AuditLogPage from "@/pages/admin/AuditLogPage";
 
 export default function App() {
   return (
@@ -50,6 +51,11 @@ export default function App() {
         <Route path="/admin/roles" element={
           <PrivateRoute permission="roles:view">
             <RolesAdminPage />
+          </PrivateRoute>
+        } />
+        <Route path="/admin/audit" element={
+          <PrivateRoute permission="audit:view">
+            <AuditLogPage />
           </PrivateRoute>
         } />
       </Route>

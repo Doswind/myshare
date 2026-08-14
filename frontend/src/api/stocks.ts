@@ -1,5 +1,5 @@
 import client from "./client";
-import type { Stock, StockQuote, JobLog, ScheduledJob } from "@/types/api";
+import type { Stock, StockQuote, JobLog, ScheduledJob, PaginatedResponse } from "@/types/api";
 
 export const fetchStock = (code: string) =>
   client.get<Stock>(`/stocks/${code}`).then((r) => r.data);
@@ -16,8 +16,10 @@ export const fetchSectors = () =>
 export const fetchIndustryNames = () =>
   client.get<{ name: string }[]>("/sectors/by-industry").then((r) => r.data);
 
-export const fetchJobs = () =>
-  client.get<JobLog[]>("/jobs").then((r) => r.data);
+export const fetchJobs = (page = 1, pageSize = 20) =>
+  client.get<PaginatedResponse<JobLog>>("/jobs", {
+    params: { page, page_size: pageSize },
+  }).then((r) => r.data);
 
 export const fetchScheduledJobs = () =>
   client.get<ScheduledJob[]>("/jobs/scheduled").then((r) => r.data);

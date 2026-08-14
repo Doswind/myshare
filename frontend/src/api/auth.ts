@@ -1,5 +1,6 @@
 // 认证 API 封装（login / me / forgot / reset / change）
 import client from "./client";
+import type { AuditLog, PaginatedResponse } from "@/types/api";
 
 export interface Permission {
   id: number;
@@ -98,4 +99,17 @@ export const rolesApi = {
 export const permissionsApi = {
   list: () =>
     client.get<Record<string, Permission[]>>("/permissions").then((r) => r.data),
+};
+
+export const auditApi = {
+  list: (params: {
+    page?: number;
+    page_size?: number;
+    action?: string;
+    status?: string;
+    username?: string;
+  }) =>
+    client
+      .get<PaginatedResponse<AuditLog>>("/audit", { params })
+      .then((r) => r.data),
 };
