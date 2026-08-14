@@ -39,7 +39,7 @@ export function FilterBar() {
           label="1年收益 ≥"
           value={minRet1y}
           min={-30}
-          max={100}
+          max={500}
           step={1}
           suffix="%"
           onChange={setMinRet1y}
