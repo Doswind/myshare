@@ -5,7 +5,7 @@ import { useFilterStore } from "@/store/filterStore";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNavigate } from "react-router-dom";
 import { RangeSlider } from "@/components/common/RangeSlider";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Pagination } from "@/components/common/Pagination";
 
 const TYPES = [
   { value: "", label: "全部" },
@@ -170,27 +170,13 @@ export default function FundListPage() {
             </div>
           ))}
         </div>
-        {total > pageSize && (
-          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 text-[11px] text-slate-500">
-            <span>第 {page} / {totalPages} 页 · 共 {total} 只</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-3 h-3" /> 上一页
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                下一页 <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        )}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          pageSize={pageSize}
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

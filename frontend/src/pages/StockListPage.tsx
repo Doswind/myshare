@@ -17,6 +17,7 @@ import {
   Filter,
   X,
 } from "lucide-react";
+import { Pagination } from "@/components/common/Pagination";
 import clsx from "clsx";
 
 type SortKey =
@@ -74,6 +75,8 @@ export default function StockListPage() {
   const [localSort, setLocalSort] = useState<SortKey>((sortBy as SortKey) ?? "fund_count");
   const [asc, setAsc] = useState(false);
   const [selectedBoards, setSelectedBoards] = useState<string[]>([]);
+  const [stockPage, setStockPage] = useState(1);
+  const [stockPageSize] = useState(50);
 
   useEffect(() => {
     fetchFilterDefaults().then(hydrate).catch(() => {});
@@ -184,6 +187,14 @@ export default function StockListPage() {
     });
     return sorted;
   }, [sourceArr, dSearch, localSort, asc]);
+
+  // 客户端分页
+  const stockTotal = view.length;
+  const stockTotalPages = Math.max(1, Math.ceil(stockTotal / stockPageSize));
+  const pagedView = view.slice((stockPage - 1) * stockPageSize, stockPage * stockPageSize);
+
+  // 筛选/搜索/排序/tab 变化时重置到第一页
+  useEffect(() => { setStockPage(1); }, [dSearch, localSort, asc, tab, selectedBoards, dMinScale, dMinRet1y, dIndustry, dPriceMin, dPriceMax]);
 
   const onSort = (k: SortKey) => {
     if (localSort === k) setAsc((v) => !v);
@@ -353,7 +364,7 @@ export default function StockListPage() {
               </tr>
             </thead>
             <tbody>
-              {view.length === 0 && !loading && (
+              {pagedView.length === 0 && !loading && (
                 <tr>
                   <td colSpan={tab === "sector" ? 9 : 9} className="text-center text-slate-400 py-6">
                     {tab === "watchlist"
@@ -362,7 +373,7 @@ export default function StockListPage() {
                   </td>
                 </tr>
               )}
-              {view.map((s) => (
+              {pagedView.map((s) => (
                 <tr
                   key={s.code}
                   onClick={() => nav(`/stocks/${s.code}`)}
@@ -429,14 +440,14 @@ export default function StockListPage() {
 
         {/* 移动端卡片列表 */}
         <div className="md:hidden max-h-[calc(100vh-200px)] overflow-auto divide-y divide-slate-100">
-          {view.length === 0 && !loading && (
+          {pagedView.length === 0 && !loading && (
             <div className="text-center text-slate-400 py-6 text-[12px]">
               {tab === "watchlist"
                 ? "暂无自选股，使用上方搜索框添加"
                 : "暂无符合筛选条件的股票"}
             </div>
           )}
-          {view.map((s) => (
+          {pagedView.map((s) => (
             <div
               key={s.code}
               onClick={() => nav(`/stocks/${s.code}`)}
@@ -484,6 +495,13 @@ export default function StockListPage() {
             </div>
           ))}
         </div>
+        <Pagination
+          page={stockPage}
+          totalPages={stockTotalPages}
+          total={stockTotal}
+          pageSize={stockPageSize}
+          onPageChange={setStockPage}
+        />
       </div>
     </div>
   );
