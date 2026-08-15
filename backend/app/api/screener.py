@@ -1,71 +1,41 @@
-"""选股分析 demo API（mock 数据，不接真实抓取）
+"""选股分析 API（真实数据：主力资金 × 价格位置双榜）
 
-GET /api/screener/candidates         — 候选列表（可按 industry / min_score 过滤）
-GET /api/screener/factors/{code}      — 单只因子详情
-GET /api/screener/holders/{code}      — 单只重仓基金列表
+GET /api/screener/candidates         — 两榜（进场 / 退场），各 Top 20
+GET /api/screener/factors/{code}      — 单只完整因子（位置/趋势/主力资金）
+GET /api/screener/holders/{code}      — 单只重仓基金列表（最新报告期）
 GET /api/screener/industries          — 候选行业列表（用于筛选下拉）
 """
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-
-from app.deps import get_current_user
-from app.services import screener_mock
+from app.deps import get_current_user, get_db
+from app.services import screener_service
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/candidates")
-async def list_candidates(
-    industry: Optional[str] = Query(None, description="行业筛选"),
-    min_score: Optional[float] = Query(None, ge=0, le=100, description="最低总分"),
-):
-    """候选列表（按 total_score 倒序）"""
-    items = screener_mock.get_candidates(industry=industry, min_score=min_score)
-    return {
-        "total": len(items),
-        "items": [
-            {
-                # 列表精简字段（避免 holders 大数组）
-                "code": c["code"],
-                "name": c["name"],
-                "industry": c["industry"],
-                "total_score": c["total_score"],
-                "score_position": c["score_position"],
-                "score_trend": c["score_trend"],
-                "score_capital": c["score_capital"],
-                "latest_price": c.get("latest_price"),
-                "market_cap_wan_yi": c.get("market_cap_wan_yi"),
-                "fund_count": c["capital"]["fund_count"],
-                "pct_rank_1y": c["factors"]["pct_rank_1y"],
-            }
-            for c in items
-        ],
-    }
+async def list_candidates(db: Session = Depends(get_db)):
+    """进场榜 / 退场榜（各 Top 20）。返回 {in, out, report_dates, data_as_of, note}"""
+    return screener_service.get_boards(db)
 
 
 @router.get("/factors/{code}")
-async def get_factors(code: str):
-    """单只因子详情（含位置/趋势/主力资金/估值四组）"""
-    data = screener_mock.get_factors(code)
+async def get_factors(code: str, db: Session = Depends(get_db)):
+    """单只因子详情（价格位置 / 趋势 / 主力资金）"""
+    data = screener_service.get_factors(db, code)
     if not data:
-        raise HTTPException(404, f"未找到 {code} 的因子数据")
+        raise HTTPException(404, f"未找到 {code} 的数据（无持仓且无 K 线）")
     return data
 
 
 @router.get("/holders/{code}")
-async def get_holders(code: str):
-    """单只重仓基金列表"""
-    items = screener_mock.get_holders(code)
-    if items is None:
-        raise HTTPException(404, f"未找到 {code} 的持仓数据")
-    return {
-        "code": code,
-        "items": items,
-    }
+async def get_holders(code: str, db: Session = Depends(get_db)):
+    """单只重仓基金列表（最新报告期）"""
+    return {"code": code, "items": screener_service.get_holders(db, code)}
 
 
 @router.get("/industries")
-async def list_industries():
-    """候选行业列表（按出现顺序）"""
-    return {"items": screener_mock.get_industries()}
+async def list_industries(db: Session = Depends(get_db)):
+    """候选行业列表"""
+    return {"items": screener_service.get_industries(db)}

@@ -1,29 +1,36 @@
 import client from "./client";
 import type { Candidate } from "@/lib/promptBuilder";
 
-interface CandidateListItem {
+/** 榜单单项（进场 / 退场） */
+export interface BoardItem {
   code: string;
   name: string;
   industry: string;
-  total_score: number;
-  score_position: number;
-  score_trend: number;
-  score_capital: number;
-  latest_price: number | null;
-  market_cap_wan_yi: number | null;
+  direction: "in" | "out";
+  reason: string;
   fund_count: number;
+  mv_change_pct_qoq: number | null;
+  funds_add: number;
+  funds_cut: number;
+  funds_new: number;
+  funds_exit: number;
+  avg_fund_ret_1y: number;
+  smart_money_index: number;
   pct_rank_1y: number;
+  latest_price: number | null;
 }
 
-export interface CandidateListResponse {
-  total: number;
-  items: CandidateListItem[];
+export interface BoardsResponse {
+  in: BoardItem[];
+  out: BoardItem[];
+  report_dates: string[];
+  data_as_of: string | null;
+  note: string | null;
 }
 
-export const fetchCandidates = (params?: { industry?: string; min_score?: number }) =>
-  client
-    .get<CandidateListResponse>("/screener/candidates", { params })
-    .then((r) => r.data);
+/** 进场榜 / 退场榜（各 Top 20） */
+export const fetchBoards = () =>
+  client.get<BoardsResponse>("/screener/candidates").then((r) => r.data);
 
 export const fetchFactors = (code: string) =>
   client.get<Omit<Candidate, "holders">>("/screener/factors/" + code).then((r) => r.data);

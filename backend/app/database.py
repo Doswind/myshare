@@ -34,7 +34,7 @@ def init_db():
     # 引入所有模型以注册 metadata
     from app.models import (
         Fund, FundHolding, Stock, Sector, SectorMember, StockQuote, JobLog,
-        Watchlist, CrawlConfig, UserFilterPreference,
+        Watchlist, CrawlConfig, UserFilterPreference, ChatSession, ChatMessage,
     )
     from app.models import rbac as _rbac_models  # 注册 User 外键目标及 RBAC 表
     Base.metadata.create_all(bind=engine)

@@ -512,6 +512,7 @@ def get_kline(
         tracking = db.query(StockKlineTracking).filter(StockKlineTracking.code == code).first()
         data_as_of = tracking.last_attempt_at if tracking else None
         last_trade = tracking.last_trade_date if tracking else None
+        paused = bool(tracking.paused) if tracking else False
         today = _today_str()
         is_intraday = bool(last_trade == today) if last_trade else False
         truncated = bool(bars and bars[-1].get("日期") < today)
@@ -525,6 +526,7 @@ def get_kline(
             "is_intraday": is_intraday,
             "source": "akshare",
             "truncated": truncated,
+            "paused": paused,
         }
     finally:
         if own_db:

@@ -103,7 +103,6 @@ export function FactorPanel({ code }: Props) {
 
   const f = factors.data.factors;
   const cap = factors.data.capital;
-  const val = factors.data.valuation;
   const tr = factors.data.trend;
 
   return (
@@ -149,32 +148,38 @@ export function FactorPanel({ code }: Props) {
           />
         </Group>
 
-        <Group title="主力资金行为（本系统独占）">
+        <Group title="主力资金行为（本系统独占，季度环比）">
           <Field label="持有该股的主力基金数" value={cap.fund_count} />
           <Field label="合计持仓市值" value={`${num(cap.total_mv_yi, 1)} 亿`} />
           <Field
             label="上季度环比加减仓"
-            value={signed(cap.mv_change_pct_qoq) + "%"}
-            color={cap.mv_change_pct_qoq > 0 ? "text-up" : "text-down"}
+            value={
+              cap.mv_change_pct_qoq === null || cap.mv_change_pct_qoq === undefined
+                ? "新进建仓"
+                : signed(cap.mv_change_pct_qoq) + "%"
+            }
+            color={
+              cap.mv_change_pct_qoq === null || cap.mv_change_pct_qoq === undefined
+                ? "text-up"
+                : cap.mv_change_pct_qoq > 0
+                  ? "text-up"
+                  : "text-down"
+            }
           />
           <Field
-            label="持仓基金平均近 1 年收益"
+            label="加/减/新进/退出（只）"
+            value={`${cap.funds_add ?? 0} / ${cap.funds_cut ?? 0} / ${cap.funds_new ?? 0} / ${cap.funds_exit ?? 0}`}
+          />
+          <Field
+            label="持仓基金近1年收益中位数"
             value={pct(cap.avg_fund_ret_1y)}
             color={cap.avg_fund_ret_1y >= 15 ? "text-up" : "text-slate-700"}
           />
           <Field
-            label="聪明钱质量分"
+            label="近1年跑赢比例"
             value={num(cap.smart_money_index, 2)}
-            color={cap.smart_money_index >= 0.7 ? "text-up" : "text-slate-700"}
+            color={cap.smart_money_index >= 0.6 ? "text-up" : "text-slate-700"}
           />
-        </Group>
-
-        <Group title="估值">
-          <Field
-            label="PE-TTM"
-            value={`${val.pe_ttm}（3y 百分位 ${val.pe_pct_rank_3y}%）`}
-          />
-          <Field label="PB" value={num(val.pb)} />
         </Group>
       </div>
 
@@ -186,7 +191,7 @@ export function FactorPanel({ code }: Props) {
       </div>
 
       <div className="mt-2 text-[10px] text-slate-400">
-        数据日期：{factors.data.data_as_of} · 全部为 mock 演示数据，不构成投资建议
+        数据日期：{factors.data.data_as_of} · 基于真实持仓与 K 线计算，不构成投资建议
       </div>
     </div>
   );

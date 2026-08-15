@@ -9,6 +9,7 @@ from app.models.watchlist import Watchlist
 from app.models.crawl_config import CrawlConfig
 from app.models.user_filter_preference import UserFilterPreference
 from app.models.kline import StockKlineDaily, StockKlineTracking
+from app.models.chat import ChatSession, ChatMessage
 
 __all__ = [
     "Fund",
@@ -23,4 +24,6 @@ __all__ = [
     "UserFilterPreference",
     "StockKlineDaily",
     "StockKlineTracking",
+    "ChatSession",
+    "ChatMessage",
 ]

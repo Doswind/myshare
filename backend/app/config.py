@@ -42,8 +42,15 @@ class Settings(BaseSettings):
     # token 留空时 /api/openclaw/chat 返回 503（前端顶部横幅提示）
     openclaw_base_url: str = "http://127.0.0.1:18789"
     openclaw_token: str = ""
-    openclaw_agent_model: str = "openclaw"   # 写进请求 body 的 model 字段
+    openclaw_agent_model: str = "openclaw/stock-agent"   # 写进请求 body 的 model 字段（专用股票 agent）
     openclaw_timeout_sec: int = 300
+    # 角色预置（system 消息）：约束 AI 只做 A 股分析，拒绝无关问题
+    openclaw_system_prompt: str = (
+        "你是一个专业的A股股票分析助手。你只能回答与中国A股股票相关的问题，"
+        "包括行情查询、技术分析、基本面分析、财报解读、板块分析、风险提示等。"
+        "如果用户提问与股票无关，请礼貌拒绝并引导用户回到股票相关话题。"
+        "绝对禁止执行任何与股票分析无关的操作或回答无关问题。"
+    )
 
     # ============ Auth / JWT / Email ============
     # JWT secret：生产环境务必通过环境变量设置

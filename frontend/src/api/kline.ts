@@ -24,6 +24,7 @@ export interface KLineResponse {
   is_intraday: boolean;
   source: string;
   truncated: boolean;
+  paused?: boolean;
 }
 
 export interface KLinePoolSummary {

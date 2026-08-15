@@ -11,11 +11,23 @@ export interface OpenClawHealth {
 export const fetchOpenclawHealth = () =>
   client.get<OpenClawHealth>("/openclaw/health").then((r) => r.data);
 
+export interface ChatAttachment {
+  /** 文件名（input_file 需要，input_image 可选） */
+  name: string;
+  /** MIME 类型，如 image/png、application/pdf */
+  media_type: string;
+  /** image → input_image；file → input_file */
+  kind: "image" | "file";
+  /** base64 编码的内容（不含 data: 前缀） */
+  data: string;
+}
+
 export interface StreamChatArgs {
   message: string;
   code?: string;
   previousResponseId?: string;
   user?: string;
+  attachments?: ChatAttachment[];
   signal?: AbortSignal;
 }
 
@@ -44,6 +56,7 @@ export async function openclawStreamChat(args: StreamChatArgs, cbs: StreamChatCa
     user: args.user,
   };
   if (args.code) body.code = args.code;
+  if (args.attachments && args.attachments.length) body.attachments = args.attachments;
 
   let resp: Response;
   try {

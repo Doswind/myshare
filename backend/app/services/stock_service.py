@@ -16,6 +16,7 @@ from app.models.fund import Fund
 from app.scrapers.stock_quotes import StockQuotesScraper
 from app.scrapers.stock_detail import StockDetailScraper
 from app.scrapers.sectors import SectorsScraper
+from app.scrapers.base import ScrapeError
 
 logger = logging.getLogger(__name__)
 
@@ -566,11 +567,13 @@ class StockService:
                     SectorMember.sector_code.in_(industry_sector_codes),
                 ).delete(synchronize_session=False)
             kinds = ("industry", "concept") if include_concepts else ("industry",)
+            fetch_errors: Dict[str, str] = {}
             for kind in kinds:
                 try:
                     sectors = await sc.fetch_all_with_members(kind)
                 except Exception as e:
                     logger.error("抓 %s 板块失败: %s", kind, e)
+                    fetch_errors[kind] = str(e)
                     continue
                 for s in sectors:
                     code = s.get("code")
@@ -635,6 +638,11 @@ class StockService:
                     st = db.query(Stock).filter(Stock.code == code).first()
                     if st:
                         st.concept_codes = ",".join(sorted(concept_map.get(code, set())))
+            # industry 是必需类型：抓取失败或一个板块都没拿到时如实报错
+            # （在 commit 之前抛出，事务回滚，不会误删既有板块成员）
+            if "industry" in kinds and (("industry" in fetch_errors) or total_sectors == 0):
+                reason = fetch_errors.get("industry") or "未获取到任何行业板块数据"
+                raise ScrapeError(f"行业板块抓取失败：{reason}")
             db.commit()
             return {"sectors": total_sectors, "stock_mappings": total_stocks}
         finally:

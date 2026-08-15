@@ -8,6 +8,7 @@ import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { fetchWatchlist, type WatchlistItem } from "@/api/watchlist";
 import { FilterBar } from "@/components/fund/FilterBar";
 import { WatchlistAddBox, WatchlistRemoveButton } from "@/components/watchlist/WatchlistAddBox";
+import { StockSearchBox } from "@/components/stock/StockSearchBox";
 import {
   ArrowUpDown,
   ArrowUp,
@@ -299,11 +300,16 @@ export default function StockListPage() {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <StockSearchBox
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={tab === "watchlist" ? "在自选里搜索 代码 / 名称 / 行业 / 板块" : "搜索 代码 / 名称 / 行业 / 板块"}
-            className="flex-1 min-w-[180px] px-2 py-0.5 text-[12px] border border-slate-300 rounded bg-white outline-none focus:border-blue-400"
+            onChange={setSearch}
+            onSelect={(h) => nav(`/stocks/${h.code}`)}
+            placeholder={
+              tab === "watchlist"
+                ? "在自选里搜索 / 全库联想（代码 / 名称 / 拼音首字母）"
+                : "搜索 / 全库联想（代码 / 名称 / 拼音首字母）"
+            }
+            className="flex-1 min-w-[220px]"
           />
         </div>
       </div>

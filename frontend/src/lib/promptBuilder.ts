@@ -22,9 +22,13 @@ export interface AnalysisFactor {
 export interface CapitalInfo {
   fund_count: number;
   total_mv_yi: number;
-  mv_change_pct_qoq: number;
+  mv_change_pct_qoq: number | null;
   avg_fund_ret_1y: number;
   smart_money_index: number;
+  funds_add?: number;
+  funds_cut?: number;
+  funds_new?: number;
+  funds_exit?: number;
 }
 
 export interface Valuation {
@@ -54,17 +58,15 @@ export interface Candidate {
   code: string;
   name: string;
   industry: string;
-  total_score: number;
-  score_position: number;
-  score_trend: number;
-  score_capital: number;
   factors: AnalysisFactor;
   capital: CapitalInfo;
-  valuation: Valuation;
+  valuation?: Valuation;
   trend: Trend;
   holders?: Holder[];
-  latest_price?: number;
-  market_cap_wan_yi?: number;
+  latest_price?: number | null;
+  market_cap_wan_yi?: number | null;
+  direction?: "in" | "out" | null;
+  reason?: string | null;
   data_as_of?: string;
 }
 
@@ -111,7 +113,6 @@ export function buildAnalysisPrompt(code: string, candidates: Candidate[]): stri
 
   const f = found.factors;
   const cap = found.capital;
-  const val = found.valuation;
   const tr = found.trend;
   const holders = found.holders ?? [];
   const holdersText = holders.length
@@ -147,16 +148,13 @@ MA20 / MA60 / MA250：${tr.ma20_dir || "—"} / ${tr.ma60_dir || "—"} / ${tr.m
 近 20 日收益率：${fmt(tr.ret_20d, 1, true)}%
 近 60 日收益率：${fmt(tr.ret_60d, 1, true)}%
 
-【主力资金行为（本系统独占）】
+【主力资金行为（本系统独占，季度环比）】
 持有该股的主力基金数：${fmt(cap.fund_count, 0)}
 合计持仓市值：${fmt(cap.total_mv_yi, 1)} 亿
-上季度环比加减仓：${fmt(cap.mv_change_pct_qoq, 1, true)}%
-持仓基金平均近 1 年收益：${pct(cap.avg_fund_ret_1y)}
-"聪明钱"质量分：${fmt(cap.smart_money_index, 2)}
-
-【估值】
-PE-TTM：${fmt(val.pe_ttm, 1)}（近 3 年百分位 ${fmt(val.pe_pct_rank_3y, 0)}%）
-PB：${fmt(val.pb)}
+上季度环比加减仓：${cap.mv_change_pct_qoq === null || cap.mv_change_pct_qoq === undefined ? "新进建仓" : fmt(cap.mv_change_pct_qoq, 1, true) + "%"}
+加仓 ${cap.funds_add ?? 0} 只 / 减仓 ${cap.funds_cut ?? 0} 只 / 新进 ${cap.funds_new ?? 0} 只 / 退出 ${cap.funds_exit ?? 0} 只
+持仓基金近 1 年收益中位数：${pct(cap.avg_fund_ret_1y)}
+持仓基金近 1 年跑赢比例：${fmt(cap.smart_money_index, 2)}
 
 【重仓基金明细】
 ${holdersText}
@@ -171,17 +169,17 @@ ${holdersText}
 请尽量结构化，便于人类快速阅读。`;
 }
 
-/** 从 OpenClaw SSE 事件中提取 text delta（兼容多种事件类型） */
+/**
+ * 从 OpenClaw SSE 事件中提取 text delta。
+ *
+ * 只接受真正的「增量」事件（类型以 .delta 结尾且带 string 类型的 delta 字段）。
+ * response.completed / response.output_text.done 等汇总事件携带的是「全量文本」，
+ * 若一并累加会导致内容重复输出，因此这里一律忽略。
+ */
 export function extractTextDelta(event: any): string {
   if (!event || typeof event !== "object") return "";
-  // OpenResponses 风格
-  if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
-    return event.delta;
-  }
-  // 通用兜底：找任何看起来是文本增量的字段
-  if (typeof event.delta === "string") return event.delta;
-  if (typeof event.text === "string") return event.text;
-  if (typeof event.output_text === "string") return event.output_text;
+  const t = typeof event.type === "string" ? event.type : "";
+  if (t.endsWith(".delta") && typeof event.delta === "string") return event.delta;
   return "";
 }
 

@@ -40,21 +40,64 @@ class OpenClawUnavailableError(OpenClawError):
     """不可达 / token 未配置 / 5xx"""
 
 
+def _build_content_parts(message: str, attachments: Optional[list] = None) -> list:
+    """把文本 + 附件拼成 user 消息的 content 数组。
+
+    - 文本 → {type: input_text, text}
+    - 图片 → {type: input_image, source: {type: base64, media_type, data}}
+    - 文件 → {type: input_file, source: {type: base64, media_type, filename, data}}
+    """
+    parts: list = [{"type": "input_text", "text": message}]
+    for att in attachments or []:
+        kind = att.get("kind")
+        media_type = att.get("media_type") or ""
+        data = att.get("data") or ""
+        if not data:
+            continue
+        if kind == "image":
+            parts.append(
+                {
+                    "type": "input_image",
+                    "source": {"type": "base64", "media_type": media_type, "data": data},
+                }
+            )
+        else:
+            parts.append(
+                {
+                    "type": "input_file",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "filename": att.get("name") or "file",
+                        "data": data,
+                    },
+                }
+            )
+    return parts
+
+
 def _build_payload(
     message: str,
     previous_response_id: Optional[str] = None,
     user: Optional[str] = None,
     stream: bool = True,
+    attachments: Optional[list] = None,
 ) -> dict:
     """构造 OpenResponses 请求体
 
-    参考 OpenResponses 协议：model + input + 可选 previous_response_id/user
+    - system 角色统一放到顶层 instructions（每轮都带，保证多轮不丢角色约束）。
+    - input 只放 user 消息；带附件时 content 为多模态数组（input_text + input_image/input_file）。
     """
+    content = _build_content_parts(message, attachments)
+    input_items = [{"type": "message", "role": "user", "content": content}]
+
     payload: dict = {
         "model": settings.openclaw_agent_model,
         "stream": stream,
-        "input": message,
+        "input": input_items,
     }
+    if settings.openclaw_system_prompt:
+        payload["instructions"] = settings.openclaw_system_prompt
     if previous_response_id:
         payload["previous_response_id"] = previous_response_id
     if user:
@@ -75,6 +118,7 @@ async def chat_stream(
     message: str,
     previous_response_id: Optional[str] = None,
     user: Optional[str] = None,
+    attachments: Optional[list] = None,
 ) -> AsyncIterator[dict]:
     """流式调用 /v1/responses，逐事件 yield 解析后的 dict。
 
@@ -91,7 +135,7 @@ async def chat_stream(
         raise OpenClawUnavailableError("OPENCLAW_TOKEN 未配置")
 
     url = f"{settings.openclaw_base_url.rstrip('/')}/v1/responses"
-    payload = _build_payload(message, previous_response_id, user, stream=True)
+    payload = _build_payload(message, previous_response_id, user, stream=True, attachments=attachments)
     headers = _build_headers()
 
     timeout = httpx.Timeout(settings.openclaw_timeout_sec, connect=5.0)

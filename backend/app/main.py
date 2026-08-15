@@ -27,6 +27,12 @@ async def lifespan(app: FastAPI):
     init_db()
     seed_rbac()
     register_jobs()
+    # 收敛上次运行残留的 running 会话消息（进程重启后无法续接）
+    try:
+        from app.services.openclaw_session_service import reset_stale_running
+        reset_stale_running()
+    except Exception as e:
+        logger.warning("收敛残留会话消息失败: %s", e)
     # OpenClaw token 缺失提示（不影响启动，/api/openclaw/chat 会按需返回 503）
     if not settings.openclaw_token:
         logger.warning(

@@ -34,7 +34,7 @@ DEFAULTS: List[Dict[str, Any]] = [
         "trading_only": True,
         "trading_only_locked": True,
         "enabled": True,
-        "description": f"基金公司 20:00 后公布当日净值，覆盖估算值；同时刷新主力基金的评级/经理/管理人。{LOCKED_REASON}",
+        "description": f"基金公司 20:00 后公布当日净值，覆盖估算值；同时刷新主力基金的评级/经理/管理人。",
     },
     {
         "job_key": "quotes",
@@ -46,7 +46,7 @@ DEFAULTS: List[Dict[str, Any]] = [
         "trading_only": True,
         "trading_only_locked": True,
         "enabled": True,
-        "description": f"刷新全部持仓股行情（仅交易时段）。{LOCKED_REASON}",
+        "description": f"刷新全部持仓股行情（仅交易时段）。",
     },
     {
         "job_key": "sectors",
@@ -66,7 +66,7 @@ DEFAULTS: List[Dict[str, Any]] = [
         "trading_only": True,
         "trading_only_locked": True,
         "enabled": True,
-        "description": f"回填持仓股的 industry_name（行业名称稳定，节假日不变）。{LOCKED_REASON}",
+        "description": f"回填持仓股的 industry_name（行业名称稳定，节假日不变）。",
     },
     {
         "job_key": "kline_incremental",
@@ -76,7 +76,7 @@ DEFAULTS: List[Dict[str, Any]] = [
         "trading_only": True,
         "trading_only_locked": True,
         "enabled": True,
-        "description": f"每个交易日 16:00 增量刷新持仓池的日 K 历史（按各股 last_trade_date → today，UPSERT）。新股票首次自动补满 6 年历史。{LOCKED_REASON}",
+        "description": f"每个交易日 16:00 增量刷新持仓池的日 K 历史（按各股 last_trade_date → today，UPSERT）。新股票首次自动补满 6 年历史。",
     },
 ]
 

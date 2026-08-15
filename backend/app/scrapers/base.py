@@ -58,8 +58,8 @@ class BaseScraper:
             await self._client.aclose()
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=2, max=20),
         retry=retry_if_exception_type((httpx.HTTPError, ScrapeError)),
         reraise=True,
     )

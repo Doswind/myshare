@@ -32,6 +32,7 @@ class KLineResponse(BaseModel):
     is_intraday: bool = False         # 当日是否未收盘
     source: str = "akshare"
     truncated: bool = False          # true 表示 DB 缺失最新数据
+    paused: bool = False             # true 表示该股已暂停抓取（连续失败超阈值）
 
 
 class KLineTrackingStatus(BaseModel):
