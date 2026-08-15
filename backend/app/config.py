@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     crawl_fund_minute: int = 0
     crawl_quote_interval_minutes: int = 5
 
+    # ============ OpenClaw Gateway (本地 AI 代理) ============
+    # 官方接口：POST {base_url}/v1/responses (OpenResponses API, OpenAI 兼容)
+    # 流式响应：stream=true 返回 SSE；session 维持用 previous_response_id
+    # 远程访问：通过 ssh -N -L 18789:127.0.0.1:18789 user@网关机器
+    # token 留空时 /api/openclaw/chat 返回 503（前端顶部横幅提示）
+    openclaw_base_url: str = "http://127.0.0.1:18789"
+    openclaw_token: str = ""
+    openclaw_agent_model: str = "openclaw"   # 写进请求 body 的 model 字段
+    openclaw_timeout_sec: int = 300
+
     # ============ Auth / JWT / Email ============
     # JWT secret：生产环境务必通过环境变量设置
     jwt_secret: str = "fund-analyzer-dev-secret-change-me-in-production"

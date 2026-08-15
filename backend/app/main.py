@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import funds, holdings, stocks, sectors, filters, jobs, watchlist, crawl_config, rbac
+from app.api import (
+    funds, holdings, stocks, sectors, filters, jobs, watchlist,
+    crawl_config, rbac, filter_preferences, screener, openclaw,
+)
 from app.config import settings
 from app.database import init_db
 from app.scheduler.scheduler import scheduler, register_jobs
@@ -24,6 +27,12 @@ async def lifespan(app: FastAPI):
     init_db()
     seed_rbac()
     register_jobs()
+    # OpenClaw token 缺失提示（不影响启动，/api/openclaw/chat 会按需返回 503）
+    if not settings.openclaw_token:
+        logger.warning(
+            "OPENCLAW_TOKEN 未配置，/api/openclaw/chat 将返回 503。"
+            "如需启用 AI 析股，请在 .env 中设置 OPENCLAW_TOKEN。"
+        )
     try:
         scheduler.start()
         logger.info("调度器已启动")
@@ -57,9 +66,16 @@ app.include_router(holdings.router, prefix="/api/holdings", tags=["holdings"])
 app.include_router(stocks.router, prefix="/api/stocks", tags=["stocks"])
 app.include_router(sectors.router, prefix="/api/sectors", tags=["sectors"])
 app.include_router(filters.router, prefix="/api/filters", tags=["filters"])
+app.include_router(
+    filter_preferences.router,
+    prefix="/api/filter-preferences",
+    tags=["filter-preferences"],
+)
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(watchlist.router, prefix="/api/watchlist", tags=["watchlist"])
 app.include_router(crawl_config.router, prefix="/api/crawl-config", tags=["crawl-config"])
+app.include_router(screener.router, prefix="/api/screener", tags=["screener"])
+app.include_router(openclaw.router, prefix="/api/openclaw", tags=["openclaw"])
 for r in rbac.routers:
     app.include_router(r)
 

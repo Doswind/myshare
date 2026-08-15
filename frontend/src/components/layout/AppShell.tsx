@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutGrid, ListChecks, BarChart3, LogOut, User, ShieldCheck, Users, KeyRound, Settings, Activity, ScrollText } from "lucide-react";
+import { LayoutGrid, ListChecks, BarChart3, LogOut, User, ShieldCheck, Users, KeyRound, Settings, Activity, ScrollText, Sparkles } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import clsx from "clsx";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,6 +26,7 @@ export function AppShell() {
 
   const NAV = [
     { path: "/", label: "持仓看板", icon: LayoutGrid, perm: "dashboard:view" as const },
+    { path: "/screener", label: "选股分析", icon: Sparkles, perm: "dashboard:view" as const },
     { path: "/funds", label: "基金列表", icon: ListChecks, perm: "funds:view" as const },
     { path: "/stocks", label: "股票列表", icon: BarChart3, perm: "stocks:view" as const },
   ];

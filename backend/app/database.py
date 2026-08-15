@@ -32,7 +32,11 @@ Base = declarative_base()
 def init_db():
     """初始化所有表（首次启动或新增表时调用）"""
     # 引入所有模型以注册 metadata
-    from app.models import Fund, FundHolding, Stock, Sector, SectorMember, StockQuote, JobLog, Watchlist, CrawlConfig
+    from app.models import (
+        Fund, FundHolding, Stock, Sector, SectorMember, StockQuote, JobLog,
+        Watchlist, CrawlConfig, UserFilterPreference,
+    )
+    from app.models import rbac as _rbac_models  # 注册 User 外键目标及 RBAC 表
     Base.metadata.create_all(bind=engine)
     # 列升级：create_all 不会给已有表加列，手动 ALTER
     _migrate_columns()

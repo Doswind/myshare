@@ -2,7 +2,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useFilterStore } from "@/store/filterStore";
 import type { SectorGroupedResponse } from "@/types/api";
 import { fetchHoldingsBySector } from "@/api/holdings";
-import { fetchFilterDefaults } from "@/api/funds";
+import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { FilterBar } from "@/components/fund/FilterBar";
 import { SectorBoard } from "@/components/sector/SectorBoard";
 import { useEffect, useState } from "react";
@@ -35,13 +35,10 @@ function formatError(e: unknown): string {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const {
-    minScale, minRet1y, priceMin, priceMax, industry, sortBy, fundedOnly, hydrate,
+    minScale, minRet1y, priceMin, priceMax, industry, sortBy, fundedOnly,
   } = useFilterStore();
 
-  // 初始化：拉一次后端默认
-  useEffect(() => {
-    fetchFilterDefaults().then(hydrate).catch(() => {});
-  }, [hydrate]);
+  usePersistedFilters();
 
   // debounce 价格
   const dMinScale = useDebounce(minScale, 250);
@@ -58,8 +55,6 @@ export default function DashboardPage() {
     price_max: dPriceMax ?? undefined,
     sort_by: sortBy,
     funded_only: fundedOnly,
-    page: 1,
-    page_size: 1000,
   };
 
   const { data, isLoading, isError, error } = useQuery<SectorGroupedResponse>({

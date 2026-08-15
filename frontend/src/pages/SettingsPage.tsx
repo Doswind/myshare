@@ -52,7 +52,17 @@ export default function SettingsPage() {
     refetchInterval: 5_000,
   });
   const inMemoryLocks: string[] = (runningInfo as any)?.in_memory_locks ?? [];
-  const serverCooldowns: Record<string, number> = (runningInfo as any)?.cooldowns ?? {};
+  const serverCooldownsRaw: Record<string, number> = (runningInfo as any)?.cooldowns ?? {};
+  const serverCooldowns: Record<string, number> = {
+    funds: serverCooldownsRaw.manual_funds ?? 0,
+    holdings: serverCooldownsRaw.manual_holdings ?? 0,
+    sectors: serverCooldownsRaw.manual_sectors ?? 0,
+    quotes: serverCooldownsRaw.manual_quotes ?? 0,
+  };
+  // DB running 兜底：进程重启后内存锁丢失，但 DB 仍有 running 记录时也禁止重复触发
+  const dbRunningIds: string[] = ((runningInfo as any)?.db_running_recent ?? []).map(
+    (j: any) => j.job_id as string,
+  );
 
   const [busy, setBusy] = useState<string | null>(null);
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
@@ -153,7 +163,18 @@ export default function SettingsPage() {
 
   // 通用冷却判断
   const cooldown = (key: string) => cooldowns[key] ?? 0;
-  const isInLock = (key: string) => inMemoryLocks.includes(key);
+
+  // 逻辑任务组：组内任一任务在跑（定时 sched_* 或手动 manual_*，含 DB running 兜底），
+  // 对应手动按钮都禁用，避免重复触发同一任务
+  const LOCK_GROUPS: Record<string, string[]> = {
+    funds: ["sched_funds_full", "manual_funds"],
+    holdings: ["manual_holdings"],
+    sectors: ["sched_sectors", "manual_sectors"],
+    quotes: ["sched_quotes", "manual_quotes"],
+  };
+  const lockIds = new Set([...inMemoryLocks, ...dbRunningIds]);
+  const isInLock = (key: string) =>
+    (LOCK_GROUPS[key] ?? [`manual_${key}`]).some((k) => lockIds.has(k));
 
   return (
     <div className="space-y-3 max-w-4xl">
@@ -165,51 +186,51 @@ export default function SettingsPage() {
             label="基金+持仓"
             hint="约 20–30 分钟"
             busy={busy === "funds"}
-            disabled={busy !== null || cooldown("funds") > 0 || isInLock("manual_funds")}
+            disabled={busy !== null || cooldown("funds") > 0 || isInLock("funds")}
             cooldownSec={cooldown("funds")}
-            inLock={isInLock("manual_funds")}
+            inLock={isInLock("funds")}
             onClick={() => confirmAndRun(
               "funds",
               triggerFundRefresh,
               "基金+持仓抓取",
-              "将全量抓取基金列表并按阈值过滤入库（清除不再满足阈值的旧基金），然后抓取全部基金的最新季报重仓持仓。\n耗时约 5-10 分钟，完成后 10 分钟内不允许再次触发。",
+              "将全量抓取基金列表并按阈值过滤入库（清除不再满足阈值的旧基金），然后抓取全部基金的最新季报重仓持仓。\n耗时约 5-10 分钟，完成后 30 分钟内不允许再次触发。",
             )}
           />
           <RefreshButton
             label="仅刷新持仓"
             hint="约 15–25 分钟"
             busy={busy === "holdings"}
-            disabled={busy !== null || cooldown("holdings") > 0 || isInLock("manual_holdings")}
+            disabled={busy !== null || cooldown("holdings") > 0 || isInLock("holdings")}
             cooldownSec={cooldown("holdings")}
-            inLock={isInLock("manual_holdings")}
+            inLock={isInLock("holdings")}
             onClick={() => confirmAndRun(
               "holdings",
               triggerHoldingsRefresh,
               "持仓抓取",
-              "将拉取 fund 表中全部基金的最新季报重仓持仓，不刷新基金列表。\n耗时约 5-10 分钟，完成后 10 分钟内不允许再次触发。",
+              "将拉取 fund 表中全部基金的最新季报重仓持仓，不刷新基金列表。\n耗时约 5-10 分钟，完成后 30 分钟内不允许再次触发。",
             )}
           />
           <RefreshButton
             label="行业+成分股"
             hint="约 1–2 分钟"
             busy={busy === "sectors"}
-            disabled={busy !== null || cooldown("sectors") > 0 || isInLock("manual_sectors")}
+            disabled={busy !== null || cooldown("sectors") > 0 || isInLock("sectors")}
             cooldownSec={cooldown("sectors")}
-            inLock={isInLock("manual_sectors")}
+            inLock={isInLock("sectors")}
             onClick={() => confirmAndRun(
               "sectors",
               triggerSectorRefresh,
               "行业+成分股抓取",
-              "将刷新全部行业分类及成分股数据。\n完成后 1 分钟内不允许再次触发。",
+              "将刷新全部行业分类及成分股数据。\n完成后 15 分钟内不允许再次触发。",
             )}
           />
           <RefreshButton
             label="行情（持仓股）"
             hint="约 30 秒"
             busy={busy === "quotes"}
-            disabled={busy !== null || cooldown("quotes") > 0 || isInLock("manual_quotes")}
+            disabled={busy !== null || cooldown("quotes") > 0 || isInLock("quotes")}
             cooldownSec={cooldown("quotes")}
-            inLock={isInLock("manual_quotes")}
+            inLock={isInLock("quotes")}
             onClick={() => confirmAndRun(
               "quotes",
               () => triggerQuoteRefresh(true),

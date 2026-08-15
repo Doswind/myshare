@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useFilterStore } from "@/store/filterStore";
 import { useDebounce } from "@/hooks/useDebounce";
 import { fetchHoldingsBySector, fetchBoards, type BoardOption } from "@/api/holdings";
-import { fetchFilterDefaults } from "@/api/funds";
+import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { fetchWatchlist, type WatchlistItem } from "@/api/watchlist";
 import { FilterBar } from "@/components/fund/FilterBar";
 import { WatchlistAddBox, WatchlistRemoveButton } from "@/components/watchlist/WatchlistAddBox";
@@ -67,20 +67,17 @@ function boardOfCode(code: string): string {
 export default function StockListPage() {
   const nav = useNavigate();
   const {
-    minScale, minRet1y, priceMin, priceMax, industry, sortBy, hydrate,
+    minScale, minRet1y, priceMin, priceMax, industry, sortBy,
+    selectedBoards, setSelectedBoards,
   } = useFilterStore();
 
+  usePersistedFilters();
   const [tab, setTab] = useState<Tab>("sector");
   const [search, setSearch] = useState("");
   const [localSort, setLocalSort] = useState<SortKey>((sortBy as SortKey) ?? "fund_count");
   const [asc, setAsc] = useState(false);
-  const [selectedBoards, setSelectedBoards] = useState<string[]>([]);
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize] = useState(50);
-
-  useEffect(() => {
-    fetchFilterDefaults().then(hydrate).catch(() => {});
-  }, [hydrate]);
 
   const dMinScale = useDebounce(minScale, 250);
   const dMinRet1y = useDebounce(minRet1y, 250);
@@ -98,8 +95,6 @@ export default function StockListPage() {
     price_max: dPriceMax ?? undefined,
     boards: selectedBoards.length ? selectedBoards : undefined,
     sort_by: sortBy,
-    page: 1,
-    page_size: 500,
   };
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["holdings-by-sector-list", sectorParams],
@@ -298,7 +293,8 @@ export default function StockListPage() {
             </button>
           )}
           <span className="text-[11px] text-slate-500 tabular ml-auto">
-            共 {view.length} / {totalCount} 只
+            共 {totalCount} 只
+            {view.length !== totalCount && <span className="ml-2">当前匹配 {view.length} 只</span>}
             {reportDate && <span className="ml-2 text-slate-400">报告期 {reportDate}</span>}
             {loading && <span className="ml-2 text-slate-400">刷新中…</span>}
           </span>

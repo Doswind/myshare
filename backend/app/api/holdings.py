@@ -24,14 +24,15 @@ async def holdings_by_sector(
     ),
     sort_by: str = Query("fund_count", regex="^(fund_count|change_pct|total_market_value)$"),
     funded_only: bool = Query(False, description="仅返回被主力基金重仓的股票"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=2000),
+    page: Optional[int] = Query(None, ge=1),
+    page_size: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
 ):
     """
     核心接口：按行业分组的股票列表
-    - 默认展示 stock 表所有股票（含无重仓）
-    - funded_only=true 时仅返回被主力基金重仓的股票
+    - 只展示当前保存基金最新报告期的持仓股票
+    - industry_name 缺失的股票归入「其它」
+    - funded_only 参数保留兼容，当前持仓集合天然已有基金来源
     """
     if boards:
         invalid = [b for b in boards if b not in VALID_BOARDS]
@@ -49,7 +50,7 @@ async def holdings_by_sector(
         price_min=price_min,
         price_max=price_max,
         boards=boards,
-        page=page,
+        page=page or 1,
         page_size=page_size,
         sort_by=sort_by,
         funded_only=funded_only,

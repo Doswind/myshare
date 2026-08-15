@@ -1,7 +1,7 @@
 """行业/概念/地域板块 + 成分股抓取器"""
 import asyncio
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from app.scrapers.base import BaseScraper
 
@@ -11,6 +11,15 @@ logger = logging.getLogger(__name__)
 class SectorsScraper(BaseScraper):
     """行业板块 + 成分股"""
     URL = "https://push2.eastmoney.com/api/qt/clist/get"
+    # httpx 当前环境未必安装 Brotli 解码器，避免接口返回 br 后 JSON 无法解析。
+    BASE_HEADERS = {
+        **BaseScraper.BASE_HEADERS,
+        "Accept-Encoding": "gzip, deflate",
+    }
+
+    def __init__(self, proxy: Optional[str] = None):
+        # 当前网络访问 push2 IPv6 会收到 Empty reply，行业抓取固定走 IPv4。
+        super().__init__(proxy=proxy, force_ipv4=True)
 
     async def list_sectors(self, kind: str = "industry") -> List[Dict]:
         """kind: industry/concept/region"""
@@ -27,7 +36,11 @@ class SectorsScraper(BaseScraper):
             "fs": fs,
             "fields": "f12,f14,f2,f3,f20,f128",
         }
-        text = await self.get(self.URL, params=params)
+        text = await self.get(
+            self.URL,
+            params=params,
+            headers={"Referer": "https://quote.eastmoney.com/"},
+        )
         data = self.strip_jsonp(text)
         out = []
         for x in (data.get("data", {}).get("diff", []) or []):
@@ -52,7 +65,11 @@ class SectorsScraper(BaseScraper):
                 "fs": f"b:{sector_code}",
                 "fields": "f12,f14,f2",
             }
-            text = await self.get(self.URL, params=params)
+            text = await self.get(
+                self.URL,
+                params=params,
+                headers={"Referer": "https://quote.eastmoney.com/"},
+            )
             data = self.strip_jsonp(text)
             diff = data.get("data", {}).get("diff", []) or []
             if not diff:
@@ -81,6 +98,7 @@ class SectorsScraper(BaseScraper):
             try:
                 members = await self.list_members(s["code"])
                 s["member_count"] = len(members)
+                s["members"] = members
                 s["member_codes"] = [m["code"] for m in members]
                 await asyncio.sleep(0.2)
             except Exception as e:

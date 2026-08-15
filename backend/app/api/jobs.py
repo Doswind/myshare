@@ -22,6 +22,9 @@ router = APIRouter()
 # 任务级超时：60 分钟（全量持仓抓取 7100+ 基金，每批 500 并发 15，约 15-30 分钟）
 JOB_TIMEOUT_SECONDS = 60 * 60
 
+# DB 里 running 状态超过该分钟数视为卡死（进程重启/异常导致锁丢失），自动标 failed 放行
+DB_RUNNING_STUCK_MINUTES = 30
+
 
 async def _run_with_log_id(job_id: str, job_name: str, coro_factory, log_id: int):
     """后台任务包装：写日志（含整体超时与异常恢复）
@@ -71,11 +74,13 @@ async def _run_with_log_id(job_id: str, job_name: str, coro_factory, log_id: int
         db.close()
 
 
-def _acquire_or_fail(job_id: str) -> None:
-    """获取任务锁 / 冷却检查：
-    - 任务正在跑 → 409
+def _acquire_or_fail(job_id: str, db: Session) -> None:
+    """获取任务锁 / 冷却检查 / DB 兜底：
+    - 同逻辑组任务正在跑（内存锁） → 409
     - 任务在冷却期 → 429（带 remaining_seconds）
+    - DB 里同组任务 running 且未超时 → 409（防进程重启后锁丢失）；超时视为卡死自动标 failed 放行
     """
+    from datetime import timedelta
     if JobGuard.is_running(job_id):
         raise HTTPException(409, f"任务 {job_id} 正在运行中，请等待当前任务完成后再试")
     remain = JobGuard.cooldown_remaining(job_id)
@@ -86,6 +91,27 @@ def _acquire_or_fail(job_id: str) -> None:
             detail=f"任务 {job_id} 冷却中，请 {remain} 秒后再试",
             headers={"Retry-After": str(remain), "X-Cooldown-Remaining": str(remain)},
         )
+    # DB 兜底：内存锁不在但 DB 仍有同组 running 记录（进程重启/异常导致锁丢失）
+    group = JobGuard.group_keys(job_id)
+    stuck_cutoff = datetime.utcnow() - timedelta(minutes=DB_RUNNING_STUCK_MINUTES)
+    db_running = (
+        db.query(JobLog)
+        .filter(JobLog.job_id.in_(group), JobLog.status == "running")
+        .order_by(desc(JobLog.started_at))
+        .all()
+    )
+    for log in db_running:
+        if log.started_at and log.started_at > stuck_cutoff:
+            raise HTTPException(
+                409,
+                f"任务 {log.job_id}（{log.job_name or ''}）仍在执行中（自 {log.started_at:%H:%M} 开始），请等待完成后再试",
+            )
+        # 超时未结束 → 视为卡死，标记 failed 放行
+        log.status = "failed"
+        log.error_message = f"running 状态超过 {DB_RUNNING_STUCK_MINUTES} 分钟，视为卡死已自动释放"
+        log.finished_at = datetime.utcnow()
+    if db_running:
+        db.commit()
     if not JobGuard.acquire_sync(job_id):
         # 双保险：上面已经检查过 running，但被并发抢占时再走一次
         raise HTTPException(409, f"任务 {job_id} 正在运行中，请等待当前任务完成后再试")
@@ -135,20 +161,20 @@ async def list_scheduled():
 
 
 @router.post("/funds/refresh")
-async def trigger_fund_refresh(background: BackgroundTasks):
+async def trigger_fund_refresh(background: BackgroundTasks, db: Session = Depends(get_db)):
     """手动触发：刷新基金 + 全量持仓"""
-    _acquire_or_fail("manual_funds")
+    _acquire_or_fail("manual_funds", db)
     async def _task():
-        return await FundService.refresh_all_funds()
+        return await FundService.refresh_full_pipeline()
     log_id = await _log_start("manual_funds", "手动刷新基金+持仓")
     asyncio.create_task(_run_with_log_id("manual_funds", "手动刷新基金+持仓", _task, log_id))
     return {"status": "started", "job_id": "manual_funds", "log_id": log_id}
 
 
 @router.post("/holdings/refresh")
-async def trigger_holdings_refresh(background: BackgroundTasks):
+async def trigger_holdings_refresh(background: BackgroundTasks, db: Session = Depends(get_db)):
     """手动触发：单独抓全部基金重仓持仓（不刷新基金列表）"""
-    _acquire_or_fail("manual_holdings")
+    _acquire_or_fail("manual_holdings", db)
     async def _task():
         count = await FundService.refresh_all_holdings()
         return {"holdings_upserted": count}
@@ -158,20 +184,20 @@ async def trigger_holdings_refresh(background: BackgroundTasks):
 
 
 @router.post("/quotes/refresh")
-async def trigger_quote_refresh(background: BackgroundTasks, only_holdings: bool = True):
+async def trigger_quote_refresh(background: BackgroundTasks, db: Session = Depends(get_db), only_holdings: bool = True):
     """手动触发：刷新行情"""
-    _acquire_or_fail("manual_quotes")
+    _acquire_or_fail("manual_quotes", db)
     from app.database import SessionLocal
-    db = SessionLocal()
+    quotes_db = SessionLocal()
     try:
         if only_holdings:
             from app.models.holding import FundHolding
-            codes = [c for (c,) in db.query(FundHolding.stock_code).distinct().all() if c]
+            codes = [c for (c,) in quotes_db.query(FundHolding.stock_code).distinct().all() if c]
         else:
             from app.models.stock import Stock
-            codes = [c for (c,) in db.query(Stock.code).all() if c]
+            codes = [c for (c,) in quotes_db.query(Stock.code).all() if c]
     finally:
-        db.close()
+        quotes_db.close()
 
     async def _task():
         return await StockService.refresh_quotes(codes)
@@ -181,9 +207,9 @@ async def trigger_quote_refresh(background: BackgroundTasks, only_holdings: bool
 
 
 @router.post("/sectors/refresh")
-async def trigger_sector_refresh(background: BackgroundTasks):
+async def trigger_sector_refresh(background: BackgroundTasks, db: Session = Depends(get_db)):
     """手动触发：刷新行业 + 成分股"""
-    _acquire_or_fail("manual_sectors")
+    _acquire_or_fail("manual_sectors", db)
     async def _task():
         return await StockService.refresh_sectors_and_industries()
     log_id = await _log_start("manual_sectors", "手动刷新行业")
@@ -192,9 +218,9 @@ async def trigger_sector_refresh(background: BackgroundTasks):
 
 
 @router.post("/stock-details/refresh")
-async def trigger_stock_detail_refresh(background: BackgroundTasks):
+async def trigger_stock_detail_refresh(background: BackgroundTasks, db: Session = Depends(get_db)):
     """手动触发：单股详情（行业/名称回填，emweb 端点，push2 限流时仍可用）"""
-    _acquire_or_fail("manual_stock_details")
+    _acquire_or_fail("manual_stock_details", db)
     async def _task():
         return await StockService.refresh_stock_details()
     log_id = await _log_start("manual_stock_details", "手动刷新股票详情")
@@ -203,13 +229,13 @@ async def trigger_stock_detail_refresh(background: BackgroundTasks):
 
 
 @router.post("/fund-details/refresh")
-async def trigger_fund_detail_refresh(background: BackgroundTasks):
+async def trigger_fund_detail_refresh(background: BackgroundTasks, db: Session = Depends(get_db)):
     """手动触发：基金详情（风险等级 / 评级 / 经理 / 管理人）
 
     刷新 fund 表全部基金的详情。
     JobGuard 锁与 manual_fund_nav 共享，避免同时跑净值+详情冲突。
     """
-    _acquire_or_fail("manual_fund_nav")
+    _acquire_or_fail("manual_fund_nav", db)
 
     async def _task():
         return await FundService.refresh_fund_details()
@@ -224,9 +250,12 @@ async def list_running_jobs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """查看当前正在运行的任务（含 JobGuard 内存锁 + 数据库 running 状态 + 冷却期）"""
+    """查看当前正在运行的任务（含 JobGuard 内存锁 + 数据库 running 状态 + 冷却期）
+
+    与 _acquire_or_fail 的卡死判定一致：running 超过 30 分钟的不返回（视为卡死）。
+    """
     from datetime import timedelta
-    cutoff = datetime.utcnow() - timedelta(hours=2)
+    cutoff = datetime.utcnow() - timedelta(minutes=DB_RUNNING_STUCK_MINUTES)
     return {
         "in_memory_locks": JobGuard.list_running(),
         "cooldowns": JobGuard.list_cooldowns(),  # job_id -> 剩余秒数

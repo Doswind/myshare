@@ -18,14 +18,16 @@ async def list_sectors(db: Session = Depends(get_db)):
 
 @router.get("/by-industry")
 async def list_industry_names(db: Session = Depends(get_db)):
-    """从 stock 表去重行业名（更准确）"""
+    """从 stock 表去重行业名，并提供行业缺失股票的兜底分类"""
     rows = (
         db.query(Stock.industry_name)
         .filter(Stock.industry_name.isnot(None), Stock.industry_name != "")
         .distinct()
         .all()
     )
-    return [{"name": r[0]} for r in rows if r[0]]
+    names = [{"name": r[0]} for r in rows if r[0]]
+    names.append({"name": "其它"})
+    return names
 
 
 @router.get("/{code}/members")

@@ -31,17 +31,24 @@ class BaseScraper:
     EAST_MONEY_UT = "fa5fd1943c7b386f172d6893dbfba10b"
     DEFAULT_TIMEOUT = 15.0
 
-    def __init__(self, proxy: Optional[str] = None):
+    def __init__(self, proxy: Optional[str] = None, force_ipv4: bool = False):
         self.proxy = proxy or settings.crawl_proxy or None
+        self.force_ipv4 = force_ipv4
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
+            # 部分东方财富 push2 IPv6 节点会建立连接后直接断开。
+            # local_address=0.0.0.0 强制使用 IPv4；配置代理时交由代理解析。
+            transport = None
+            if self.force_ipv4 and not self.proxy:
+                transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
             self._client = httpx.AsyncClient(
                 timeout=self.DEFAULT_TIMEOUT,
                 headers=self.BASE_HEADERS.copy(),
                 follow_redirects=True,
                 proxy=self.proxy,
+                transport=transport,
                 trust_env=False,  # 禁用环境代理，避免连接被代理拦截
             )
         return self._client

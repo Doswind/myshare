@@ -335,26 +335,32 @@ class StockService:
 
     @staticmethod
     async def refresh_quotes(codes: Optional[List[str]] = None) -> Dict:
-        """刷新行情。codes=None 表示从 stock 表读所有要抓的代码
+        """刷新当前基金持仓股票行情。
 
-        抓取范围（统一来源 = stock 表）：
-        - 基金持仓涉及的股票
-        - 用户自选股涉及的股票
-        （任一来源都会把股票写入 stock 表，所以从 stock 表读即可）
-
-        同时回填 stock.name（行情里带的名称，仅在本地为空时）
+        codes=None 时只从当前保存基金的最新报告期持仓中取代码，
+        不再把历史股票或其它来源的 stock 表记录混入本次抓取。
         """
         sq = StockQuotesScraper()
         try:
             if codes:
                 items = await sq.fetch_batch(codes)
             else:
-                # 从 stock 表读所有 code（单一来源）
+                # 从当前保存基金的最新报告期持仓读取代码
                 from app.database import SessionLocal
                 db_q = SessionLocal()
                 try:
-                    rows = db_q.query(Stock.code).all()
-                    codes = [r[0] for r in rows if r[0]]
+                    latest = (
+                        db_q.query(FundHolding.report_date)
+                        .join(Fund, Fund.code == FundHolding.fund_code)
+                        .order_by(FundHolding.report_date.desc())
+                        .first()
+                    )
+                    q = db_q.query(FundHolding.stock_code).join(
+                        Fund, Fund.code == FundHolding.fund_code
+                    )
+                    if latest:
+                        q = q.filter(FundHolding.report_date == latest[0])
+                    codes = sorted({r[0] for r in q.distinct().all() if r[0]})
                 finally:
                     db_q.close()
                 if not codes:
@@ -415,7 +421,14 @@ class StockService:
         finally:
             db.close()
 
-        return {"snapshots": len(items), "snapshot_at": snapshot_at}
+        requested = set(codes or [])
+        stored_codes = {row["code"] for row in quote_rows}
+        return {
+            "snapshots": len(quote_rows),
+            "requested": len(requested),
+            "missing": len(requested - stored_codes),
+            "snapshot_at": snapshot_at,
+        }
 
     @staticmethod
     def cleanup_old_quotes(db: Session, keep_days: int = 30) -> int:
@@ -428,10 +441,10 @@ class StockService:
 
     @staticmethod
     async def refresh_stock_details(codes: List[str] = None, ttl_hours: int = 24) -> Dict:
-        """回填 stock.name / industry_name（用 emweb 单股接口，push2 限流时也能用）
+        """回填当前基金持仓股票的 name / industry_name。
 
-        抓取范围（统一来源 = stock 表）：所有在 stock 表里的股票
-        跳过条件：本地已有 industry_name 且 details_fetched_at 在 ttl_hours 内
+        codes=None 时以当前保存基金最新报告期持仓为范围；
+        跳过本地已有完整信息且仍在 TTL 内的股票。
         """
         from datetime import datetime, timedelta
         from app.database import SessionLocal
@@ -451,9 +464,19 @@ class StockService:
                     )
                     .all()
                 }
-                # 待抓：stock 表所有 code - 已 fresh 的
-                all_codes = [c for (c,) in db.query(Stock.code).all() if c]
-                codes = sorted(set(all_codes) - fresh)
+                latest = (
+                    db.query(FundHolding.report_date)
+                    .join(Fund, Fund.code == FundHolding.fund_code)
+                    .order_by(FundHolding.report_date.desc())
+                    .first()
+                )
+                q = db.query(FundHolding.stock_code).join(
+                    Fund, Fund.code == FundHolding.fund_code
+                )
+                if latest:
+                    q = q.filter(FundHolding.report_date == latest[0])
+                holding_codes = {c for (c,) in q.distinct().all() if c}
+                codes = sorted(holding_codes - fresh)
             if not codes:
                 return {"details": 0}
         finally:
@@ -499,15 +522,51 @@ class StockService:
         return {"details": n}
 
     @staticmethod
-    async def refresh_sectors_and_industries() -> Dict:
-        """抓行业 + 概念板块 + 成分股，反向填充 stock.industry_*"""
+    async def refresh_sectors_and_industries(
+        codes: Optional[List[str]] = None,
+        include_concepts: bool = False,
+    ) -> Dict:
+        """抓行业并回填指定持仓股票；概念板块默认保持现状。
+
+        默认只维护当前保存基金最新报告期持仓股票的板块关系，
+        避免把全市场成分股混入当前持仓数据。
+        """
         sc = SectorsScraper()
         from app.database import SessionLocal
+        from app.models.sector import Sector, SectorMember
         db = SessionLocal()
         try:
+            if codes is None:
+                latest = (
+                    db.query(FundHolding.report_date)
+                    .join(Fund, Fund.code == FundHolding.fund_code)
+                    .order_by(FundHolding.report_date.desc())
+                    .first()
+                )
+                q = db.query(FundHolding.stock_code).join(
+                    Fund, Fund.code == FundHolding.fund_code
+                )
+                if latest:
+                    q = q.filter(FundHolding.report_date == latest[0])
+                codes = sorted({c for (c,) in q.distinct().all() if c})
+            if not codes:
+                return {"sectors": 0, "stock_mappings": 0}
             total_stocks = 0
             total_sectors = 0
-            for kind in ("industry", "concept"):
+            target_codes = set(codes)
+            concept_map: Dict[str, set] = {}
+            if target_codes:
+                industry_sector_codes = {
+                    code for (code,) in db.query(Sector.code).filter(
+                        Sector.kind == "industry"
+                    ).all()
+                }
+                db.query(SectorMember).filter(
+                    SectorMember.stock_code.in_(target_codes),
+                    SectorMember.sector_code.in_(industry_sector_codes),
+                ).delete(synchronize_session=False)
+            kinds = ("industry", "concept") if include_concepts else ("industry",)
+            for kind in kinds:
                 try:
                     sectors = await sc.fetch_all_with_members(kind)
                 except Exception as e:
@@ -519,7 +578,6 @@ class StockService:
                     if not code or not name:
                         continue
                     # upsert sector
-                    from app.models.sector import Sector, SectorMember
                     row = db.query(Sector).filter(Sector.code == code).first()
                     if not row:
                         row = Sector(code=code, name=name, kind=kind, change_pct=s.get("change_pct"), lead_stock=s.get("lead_stock"))
@@ -530,32 +588,54 @@ class StockService:
                         row.change_pct = s.get("change_pct")
                         row.lead_stock = s.get("lead_stock")
 
-                    # 清空旧成分股
-                    db.query(SectorMember).filter(SectorMember.sector_code == code).delete()
+                    # 全量模式重建板块成员；当前持仓模式只替换 target_codes，
+                    # 不影响其它股票的板块关系。
+                    if not target_codes:
+                        db.query(SectorMember).filter(
+                            SectorMember.sector_code == code
+                        ).delete()
 
+                    members = s.get("members", [])
                     member_codes = s.get("member_codes", [])
+                    if target_codes:
+                        members = [m for m in members if m.get("code") in target_codes]
+                        member_codes = [m["code"] for m in members]
                     for mc in member_codes:
                         if not mc or len(mc) != 6:
                             continue
                         db.add(SectorMember(sector_code=code, stock_code=mc))
 
-                    # 反向填充 stock（仅 industry）
+                    # 反向填充当前持仓股票的基础信息和主行业
                     if kind == "industry":
-                        for mc in member_codes:
+                        for member in members:
+                            mc = member.get("code")
                             if not mc or len(mc) != 6:
                                 continue
                             st = db.query(Stock).filter(Stock.code == mc).first()
                             if not st:
                                 market = 1 if mc.startswith("6") else 0
-                                st = Stock(code=mc, name="", market=market, secid=f"{market}.{mc}")
+                                st = Stock(
+                                    code=mc,
+                                    name=member.get("name") or mc,
+                                    market=market,
+                                    secid=f"{market}.{mc}",
+                                )
                                 db.add(st)
-                            # 取第一个行业为主行业
-                            if not st.industry_name:
-                                st.industry_code = code
-                                st.industry_name = name
+                            elif member.get("name") and (not st.name or st.name == st.code):
+                                st.name = member["name"]
+                            st.industry_code = code
+                            st.industry_name = name
+                    elif kind == "concept":
+                        for mc in member_codes:
+                            concept_map.setdefault(mc, set()).add(code)
                     total_sectors += 1
                     total_stocks += len(member_codes)
-                db.commit()
+            if target_codes and include_concepts:
+                for code in target_codes:
+                    st = db.query(Stock).filter(Stock.code == code).first()
+                    if st:
+                        st.concept_codes = ",".join(sorted(concept_map.get(code, set())))
+            db.commit()
             return {"sectors": total_sectors, "stock_mappings": total_stocks}
         finally:
             db.close()

@@ -21,6 +21,7 @@ from app.models.job_log import JobLog
 from app.models.crawl_config import CrawlConfig
 from app.services.fund_service import FundService
 from app.services.stock_service import StockService
+from app.utils.job_guard import JobGuard
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +59,20 @@ def _run_async(coro):
 
 
 def job_funds_full():
+    # 与手动触发（manual_funds）互斥：同组任务在跑时跳过本次调度
+    if not JobGuard.acquire_sync("sched_funds_full"):
+        logger.warning("[sched] funds_full 跳过：同组任务（手动/定时）正在运行")
+        return
     log_id = _new_log("sched_funds_full", "定时：基金列表+全量持仓")
     try:
-        result = _run_async(FundService.refresh_all_funds())
+        result = _run_async(FundService.refresh_full_pipeline())
         _finish_log(log_id, "success", items=result.get("funds_upserted", 0))
         logger.info("[sched] funds_full done: %s", result)
     except Exception as e:
         logger.exception("[sched] funds_full failed")
         _finish_log(log_id, "failed", err=str(e))
+    finally:
+        JobGuard.release("sched_funds_full")
 
 
 def job_fund_nav():
@@ -73,6 +80,10 @@ def job_fund_nav():
 
     只刷新 fund 表已有基金的净值和详情，不抓基金列表/持仓（那些由 funds_full 每周抓）。
     """
+    # 与手动触发（manual_fund_nav）互斥
+    if not JobGuard.acquire_sync("sched_fund_nav"):
+        logger.warning("[sched] fund_nav 跳过：同组任务（手动/定时）正在运行")
+        return
     log_id = _new_log("sched_fund_nav", "定时：基金净值+详情")
     try:
         from app.scrapers.eastmoney_funds import EastmoneyFundsScraper
@@ -111,9 +122,15 @@ def job_fund_nav():
     except Exception as e:
         logger.exception("[sched] fund_nav failed")
         _finish_log(log_id, "failed", err=str(e))
+    finally:
+        JobGuard.release("sched_fund_nav")
 
 
 def job_quotes():
+    # 与手动触发（manual_quotes）互斥
+    if not JobGuard.acquire_sync("sched_quotes"):
+        logger.warning("[sched] quotes 跳过：同组任务（手动/定时）正在运行")
+        return
     log_id = _new_log("sched_quotes", "定时：持仓股票行情")
     try:
         from app.models.holding import FundHolding
@@ -127,9 +144,15 @@ def job_quotes():
     except Exception as e:
         logger.exception("[sched] quotes failed")
         _finish_log(log_id, "failed", err=str(e))
+    finally:
+        JobGuard.release("sched_quotes")
 
 
 def job_sectors():
+    # 与手动触发（manual_sectors）互斥
+    if not JobGuard.acquire_sync("sched_sectors"):
+        logger.warning("[sched] sectors 跳过：同组任务（手动/定时）正在运行")
+        return
     log_id = _new_log("sched_sectors", "定时：行业+成分股")
     try:
         result = _run_async(StockService.refresh_sectors_and_industries())
@@ -137,9 +160,15 @@ def job_sectors():
     except Exception as e:
         logger.exception("[sched] sectors failed")
         _finish_log(log_id, "failed", err=str(e))
+    finally:
+        JobGuard.release("sched_sectors")
 
 
 def job_stock_details():
+    # 与手动触发（manual_stock_details）互斥
+    if not JobGuard.acquire_sync("sched_stock_details"):
+        logger.warning("[sched] stock_details 跳过：同组任务（手动/定时）正在运行")
+        return
     log_id = _new_log("sched_stock_details", "定时：股票详情(行业)")
     try:
         result = _run_async(StockService.refresh_stock_details())
@@ -147,6 +176,8 @@ def job_stock_details():
     except Exception as e:
         logger.exception("[sched] stock_details failed")
         _finish_log(log_id, "failed", err=str(e))
+    finally:
+        JobGuard.release("sched_stock_details")
 
 
 # job_key → 实际函数

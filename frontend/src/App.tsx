@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { PrivateRoute } from "@/components/PrivateRoute";
 import DashboardPage from "@/pages/DashboardPage";
+import ScreenerPage from "@/pages/ScreenerPage";
 import FundListPage from "@/pages/FundListPage";
 import FundDetailPage from "@/pages/FundDetailPage";
 import StockDetailPage from "@/pages/StockDetailPage";
@@ -32,6 +33,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/screener" element={<ScreenerPage />} />
         <Route path="/funds" element={<FundListPage />} />
         <Route path="/funds/:code" element={<FundDetailPage />} />
         <Route path="/stocks" element={<StockListPage />} />

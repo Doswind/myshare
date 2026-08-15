@@ -54,3 +54,6 @@ tmp/
 temp/
 *.tmp
 .cache/
+
+# Comate IDE 本地工作区（spec/任务/草稿，不进版本控制）
+.comate/

@@ -34,6 +34,11 @@ class StockQuotesScraper(BaseScraper):
             try:
                 items = await self._fetch_batch_eastmoney(chunk)
                 out.extend(items)
+                returned = {item["code"] for item in items}
+                missing = [code for code in chunk if code not in returned]
+                if missing:
+                    logger.warning("[push2] %d 只股票未返回，回退腾讯补抓", len(missing))
+                    out.extend(await self._fetch_batch_tencent(missing))
             except Exception as e:
                 logger.warning("[push2] 批量行情失败，回退到腾讯: %s", e)
                 items = await self._fetch_batch_tencent(chunk)

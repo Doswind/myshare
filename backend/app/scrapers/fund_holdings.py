@@ -136,9 +136,21 @@ class FundHoldingsScraper(BaseScraper):
         season: int,
         concurrency: int = 8,
     ) -> Dict[str, List[Dict[str, Any]]]:
-        """并发抓取多只基金的持仓"""
+        """并发抓取多只基金的持仓，保持旧接口只返回结果"""
+        results, _ = await self.fetch_many_with_failures(codes, year, season, concurrency)
+        return results
+
+    async def fetch_many_with_failures(
+        self,
+        codes: List[str],
+        year: int,
+        season: int,
+        concurrency: int = 8,
+    ) -> tuple[Dict[str, List[Dict[str, Any]]], Dict[str, str]]:
+        """并发抓取多只基金的持仓，同时保留失败基金，避免失败被当成空持仓"""
         sem = asyncio.Semaphore(concurrency)
         results: Dict[str, List[Dict[str, Any]]] = {}
+        failures: Dict[str, str] = {}
 
         async def _one(code: str):
             async with sem:
@@ -147,10 +159,10 @@ class FundHoldingsScraper(BaseScraper):
                     results[code] = data
                 except Exception as e:
                     logger.warning("抓取基金 %s 持仓失败: %s", code, e)
-                    results[code] = []
+                    failures[code] = str(e)[:200]
 
         await asyncio.gather(*[_one(c) for c in codes])
-        return results
+        return results, failures
 
     @staticmethod
     def latest_season() -> tuple:

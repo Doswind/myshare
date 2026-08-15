@@ -1,4 +1,4 @@
-"""聚合服务：主力基金 → 行业版块 → 股票（核心）"""
+"""聚合服务：当前基金快照 → 行业板块 → 股票（核心）"""
 import logging
 from typing import Optional, Dict, Any, List
 from collections import defaultdict
@@ -50,7 +50,7 @@ BOARD_PREFIXES: Dict[str, List[str]] = {
 
 
 class AggregationService:
-    """核心聚合：按行业分组的、来自主力基金重仓的股票列表"""
+    """核心聚合：按行业分组的、来自当前基金快照的股票列表"""
 
     @staticmethod
     def get_stocks_by_sector(
@@ -62,7 +62,7 @@ class AggregationService:
         price_max: Optional[float] = None,
         boards: Optional[List[str]] = None,
         page: int = 1,
-        page_size: int = 100,
+        page_size: Optional[int] = None,
         sort_by: str = "fund_count",
         funded_only: bool = False,
     ) -> Dict[str, Any]:
@@ -86,18 +86,26 @@ class AggregationService:
         # 2. 最新一期报告日期（可能为 None：还没抓取过持仓）
         latest_date_row = (
             db.query(FundHolding.report_date)
-            .filter(FundHolding.fund_code.in_(main_subq))
+            .filter(FundHolding.fund_code.in_(main_subq.select()))
             .order_by(FundHolding.report_date.desc())
             .first()
         )
         latest_date = latest_date_row[0] if latest_date_row else None
 
-        # 3. 持仓聚合子查询（用于后续 agg_rows，不参与 base 查询的 JOIN）
-        holding_filters = [FundHolding.fund_code.in_(main_subq)]
+        # 3. 当前筛选基金最新报告期的持仓股票集合。
+        #    看板必须以持仓为准，不能直接查询残留在 stock 表中的历史股票。
+        holding_filters = [FundHolding.fund_code.in_(main_subq.select())]
         if latest_date:
             holding_filters.append(FundHolding.report_date == latest_date)
+        holding_stocks_subq = (
+            db.query(FundHolding.stock_code.label("code"))
+            .filter(*holding_filters)
+            .distinct()
+            .subquery()
+        )
 
-        # 4. base 查询：stock 表 + 最新 quote（不再 INNER JOIN holdings）
+        # 4. base 查询：当前持仓股票 + stock 元数据 + 最新行情。
+        #    stock 元数据缺失时仍保留股票，行业统一归到“其它”。
         latest_quote_subq = (
             db.query(
                 StockQuote.code,
@@ -109,34 +117,36 @@ class AggregationService:
 
         base = (
             db.query(
-                Stock.code,
+                holding_stocks_subq.c.code,
                 Stock.name,
                 Stock.industry_name,
                 StockQuote.price,
                 StockQuote.change_pct,
                 StockQuote.market_cap,
             )
+            .outerjoin(Stock, Stock.code == holding_stocks_subq.c.code)
             .outerjoin(
                 latest_quote_subq,
-                latest_quote_subq.c.code == Stock.code,
+                latest_quote_subq.c.code == holding_stocks_subq.c.code,
             )
             .outerjoin(
                 StockQuote,
                 and_(
-                    StockQuote.code == Stock.code,
+                    StockQuote.code == holding_stocks_subq.c.code,
                     StockQuote.snapshot_at == latest_quote_subq.c.max_at,
                 ),
             )
-            .filter(
-                Stock.industry_name.isnot(None),
-                Stock.industry_name != "",
-            )
-            .group_by(Stock.code, Stock.name, Stock.industry_name, StockQuote.price,
+            .group_by(holding_stocks_subq.c.code, Stock.name, Stock.industry_name, StockQuote.price,
                       StockQuote.change_pct, StockQuote.market_cap)
         )
 
         if industry_name:
-            base = base.filter(Stock.industry_name == industry_name)
+            if industry_name == "其它":
+                base = base.filter(
+                    or_(Stock.industry_name.is_(None), Stock.industry_name == "")
+                )
+            else:
+                base = base.filter(Stock.industry_name == industry_name)
         if price_min is not None:
             base = base.filter(StockQuote.price >= price_min)
         if price_max is not None:
@@ -153,19 +163,20 @@ class AggregationService:
 
         rows = base.all()
         if not rows:
-            return {"total": 0, "page": page, "page_size": page_size, "sectors": []}
+            return {"total": 0, "page": page, "page_size": 0, "sectors": []}
 
         # 5. 内存聚合：按股票计算 fund_count / total_market_value
         stock_codes = [r.code for r in rows]
         agg_query = (
             db.query(
                 FundHolding.stock_code,
+                func.max(FundHolding.stock_name).label("holding_name"),
                 func.count(distinct(FundHolding.fund_code)).label("fund_count"),
                 func.sum(FundHolding.market_value).label("total_mv"),
                 func.sum(FundHolding.ratio_net).label("total_ratio"),
             )
             .filter(
-                FundHolding.fund_code.in_(main_subq),
+                FundHolding.fund_code.in_(main_subq.select()),
                 FundHolding.stock_code.in_(stock_codes),
             )
         )
@@ -174,6 +185,7 @@ class AggregationService:
         agg_rows = agg_query.group_by(FundHolding.stock_code).all()
         agg_map = {
             r.stock_code: {
+                "holding_name": r.holding_name,
                 "fund_count": r.fund_count or 0,
                 "total_market_value": r.total_mv or 0,
                 "total_ratio": r.total_ratio or 0,
@@ -185,15 +197,17 @@ class AggregationService:
         stock_list: List[Dict] = []
         for r in rows:
             agg = agg_map.get(r.code, {})
+            stock_name = r.name if r.name and r.name != r.code else agg.get("holding_name")
+            display_agg = {k: v for k, v in agg.items() if k != "holding_name"}
             stock_list.append({
                 "code": r.code,
-                "name": r.name or r.code,
-                "industry_name": r.industry_name or "未分类",
+                "name": stock_name or r.code,
+                "industry_name": r.industry_name or "其它",
                 "board": classify_board(r.code),
                 "price": r.price,
                 "change_pct": r.change_pct,
                 "market_cap": r.market_cap,
-                **agg,
+                **display_agg,
             })
 
         # 7. 排序
@@ -231,11 +245,16 @@ class AggregationService:
 
         # 10. 分页（按行业级分页）
         total = len(stock_list)
-        start = (page - 1) * page_size
-        end = start + page_size
-        # 简化：前 page_size 只股票，再按行业聚合
         flat = [s for sect in sector_list for s in sect["stocks"]]
-        flat_paged = flat[start:end]
+        if page_size is None:
+            # 看板/股票列表默认返回完整结果，不依赖某个写死的上限。
+            flat_paged = flat
+            response_page_size = total
+        else:
+            start = (page - 1) * page_size
+            end = start + page_size
+            flat_paged = flat[start:end]
+            response_page_size = page_size
         # 重新按行业聚合
         grouped2 = defaultdict(list)
         for s in flat_paged:
@@ -258,7 +277,7 @@ class AggregationService:
         return {
             "total": total,
             "page": page,
-            "page_size": page_size,
+            "page_size": response_page_size,
             "sectors": paged_sectors,
             "report_date": latest_date,
         }

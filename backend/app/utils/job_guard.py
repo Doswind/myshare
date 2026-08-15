@@ -1,7 +1,7 @@
 """任务去重 + 冷却工具：保证同 job_id 同时只允许一个在跑 + 完成后 N 分钟内不许再触发"""
 import time
 import logging
-from typing import Set, Dict
+from typing import Set, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -14,28 +14,51 @@ class JobGuard:
     - is_running / list_running / force_release：管理 / 调试
     - get_cooldown / record_completion：冷却管理
 
+    逻辑任务组（JOB_GROUPS）：同一业务任务的定时（sched_*）与手动（manual_*）形态
+    共享互斥锁 —— 组内任一 key 在跑，其余 key 都不允许触发，
+    避免「定时任务在跑时手动触发同一任务」的并行冲突。
+
     set.add() / dict 赋值 在 CPython 下原子（受 GIL 保护），无需额外锁
     """
     _running: Set[str] = set()
     # job_id -> 下次允许触发的 Unix 时间戳（含 cooldown）
     _cooldown_until: Dict[str, float] = {}
 
+    # 逻辑任务组：组内任一 key 在跑 → 其余 key 都拒绝触发
+    # manual_holdings 无定时形态，单独成组
+    JOB_GROUPS: Dict[str, List[str]] = {
+        "funds_full": ["sched_funds_full", "manual_funds"],
+        "fund_nav": ["sched_fund_nav", "manual_fund_nav"],
+        "quotes": ["sched_quotes", "manual_quotes"],
+        "sectors": ["sched_sectors", "manual_sectors"],
+        "stock_details": ["sched_stock_details", "manual_stock_details"],
+    }
+
     # 各手动抓取任务的冷却时间（秒）
-    # 基金全量抓取最重，给 10 分钟（含净值+详情）
-    # 行情/行业/详情相对轻，给 1 分钟
+    # 手动任务完成后冷却时间
     COOLDOWN_SECONDS = {
-        "manual_funds": 10 * 60,
-        "manual_fund_nav": 10 * 60,  # 基金净值+详情（合并后）
-        "manual_holdings": 10 * 60,  # 全量持仓抓取（7100+基金，耗时较长）
+        "manual_funds": 30 * 60,  # 基金列表 + 全量持仓
+        "manual_fund_nav": 30 * 60,  # 基金净值 + 详情
+        "manual_holdings": 30 * 60,  # 全量持仓
         "manual_quotes": 60,
-        "manual_sectors": 60,
+        "manual_sectors": 15 * 60,
         "manual_stock_details": 30,
     }
 
     @classmethod
+    def group_keys(cls, job_id: str) -> List[str]:
+        """返回 job_id 所属逻辑组的全部 key（未入组的单任务自成一组）"""
+        for keys in cls.JOB_GROUPS.values():
+            if job_id in keys:
+                return keys
+        return [job_id]
+
+    @classmethod
     def acquire_sync(cls, job_id: str) -> bool:
-        """同步获取任务锁。返回 True=成功可执行，False=已有同名任务在跑"""
-        if job_id in cls._running:
+        """同步获取任务锁（按逻辑组互斥）。
+        返回 True=成功可执行，False=同组已有任务在跑或冷却中"""
+        group = cls.group_keys(job_id)
+        if any(k in cls._running for k in group):
             return False
         # 冷却期检查
         if cls._cooldown_until.get(job_id, 0) > time.time():
@@ -55,7 +78,8 @@ class JobGuard:
 
     @classmethod
     def is_running(cls, job_id: str) -> bool:
-        return job_id in cls._running
+        """同组内任一 key 在跑即视为在跑"""
+        return any(k in cls._running for k in cls.group_keys(job_id))
 
     @classmethod
     def cooldown_remaining(cls, job_id: str) -> int:
