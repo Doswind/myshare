@@ -14,8 +14,8 @@ class CrawlConfig(Base):
 
     job_key = Column(String(40), primary_key=True, comment="稳定标识，如 funds_full / fund_nav / quotes / sectors / fund_details / stock_details")
     display_name = Column(String(60), nullable=False, comment="中文名（设置页展示）")
-    # 触发类型：off=关闭 / daily=每天定点 / weekly=每周定点 / interval=按周期
-    cron_type = Column(String(10), default="daily", comment="off / daily / weekly / interval")
+    # 触发类型：off=关闭 / daily=每天定点 / weekly=每周定点 / monthly=每月定点 / quarterly=每季度定点 / interval=按周期
+    cron_type = Column(String(10), default="daily", comment="off / daily / weekly / monthly / quarterly / interval")
     # interval 时使用
     interval_minutes = Column(Integer, default=5, comment="interval 模式下的周期（分钟）")
     # daily / weekly 时使用（HH:MM）

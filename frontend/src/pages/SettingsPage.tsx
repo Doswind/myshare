@@ -679,7 +679,7 @@ function CrawlStrategySection({
           <div className="text-[13px] font-semibold text-slate-800">抓取策略配置</div>
           <div className="text-[10px] text-slate-400 mt-0.5">
             修改后保存即可热重载调度器，无需重启服务。
-            <span className="ml-2">关闭=不调度 · daily=每天定时 · weekly=每周定时 · interval=按周期（可设交易窗口）</span>
+            <span className="ml-2">关闭=不调度 · daily=每天 · weekly=每周 · monthly=每月 · quarterly=每季度 · interval=按周期（可设交易窗口）</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -752,6 +752,8 @@ function CrawlStrategySection({
                       <option value="off">关闭</option>
                       <option value="daily">每天定时</option>
                       <option value="weekly">每周定时</option>
+                      <option value="monthly">每月定时</option>
+                      <option value="quarterly">每季度</option>
                       <option value="interval">按周期</option>
                     </select>
                   </td>
@@ -779,6 +781,30 @@ function CrawlStrategySection({
                             <option key={i} value={i}>{w}</option>
                           ))}
                         </select>
+                        <input
+                          type="time"
+                          value={c.time_of_day}
+                          onChange={(e) => updateField(c.job_key, "time_of_day", e.target.value)}
+                          disabled={!c.enabled}
+                          className="w-[74px] px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                        />
+                      </div>
+                    )}
+                    {c.cron_type === "monthly" && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-slate-500 text-[11px]">每月 1 号</span>
+                        <input
+                          type="time"
+                          value={c.time_of_day}
+                          onChange={(e) => updateField(c.job_key, "time_of_day", e.target.value)}
+                          disabled={!c.enabled}
+                          className="w-[74px] px-1.5 py-0.5 border border-slate-300 rounded tabular text-[12px] disabled:bg-slate-50"
+                        />
+                      </div>
+                    )}
+                    {c.cron_type === "quarterly" && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-slate-500 text-[11px]">4/5/9/11月 5号</span>
                         <input
                           type="time"
                           value={c.time_of_day}

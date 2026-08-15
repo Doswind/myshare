@@ -2,12 +2,12 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     funds, holdings, stocks, sectors, filters, jobs, watchlist,
-    crawl_config, rbac, filter_preferences, screener, openclaw,
+    crawl_config, rbac, filter_preferences, screener, openclaw, kline,
 )
 from app.config import settings
 from app.database import init_db
@@ -76,6 +76,14 @@ app.include_router(watchlist.router, prefix="/api/watchlist", tags=["watchlist"]
 app.include_router(crawl_config.router, prefix="/api/crawl-config", tags=["crawl-config"])
 app.include_router(screener.router, prefix="/api/screener", tags=["screener"])
 app.include_router(openclaw.router, prefix="/api/openclaw", tags=["openclaw"])
+
+# K 线路由：合并到 /api/stocks/{code}/kline，避免新增顶级前缀
+from app.deps import get_current_user as _gcu
+from fastapi import Depends as _Depends
+kline_protected = APIRouter(dependencies=[_Depends(_gcu)])
+from app.api.kline import router as _kline_router
+kline_protected.include_router(_kline_router)
+app.include_router(kline_protected, prefix="/api/stocks", tags=["kline"])
 for r in rbac.routers:
     app.include_router(r)
 

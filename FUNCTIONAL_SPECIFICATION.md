@@ -829,11 +829,152 @@ npm run build
 | 持仓模型 | `backend/app/models/holding.py` |
 | 股票模型 | `backend/app/models/stock.py` |
 | 行情模型 | `backend/app/models/quote.py` |
+| 选股 OpenClaw 客户端 | `backend/app/services/openclaw_client.py` |
+| 选股 Mock 数据 | `backend/app/services/screener_mock.py` |
+| 选股接口 | `backend/app/api/screener.py` |
+| OpenClaw 代理接口 | `backend/app/api/openclaw.py` |
 | 前端路由 | `frontend/src/App.tsx` |
 | 持仓看板 | `frontend/src/pages/DashboardPage.tsx` |
 | 股票列表 | `frontend/src/pages/StockListPage.tsx` |
+| 选股分析 | `frontend/src/pages/ScreenerPage.tsx` |
+| 选股候选表 / 因子 / AI 对话 | `frontend/src/components/screener/{CandidateTable,FactorPanel,AIChatDialog}.tsx` |
+| 选股 SSE / Prompt 工具 | `frontend/src/lib/{sseStream,promptBuilder}.ts` |
 | 设置和任务页面 | `frontend/src/pages/SettingsPage.tsx` |
 | 用户管理 | `frontend/src/pages/admin/UsersAdminPage.tsx` |
 | 角色管理 | `frontend/src/pages/admin/RolesAdminPage.tsx` |
 | 审计日志 | `frontend/src/pages/admin/AuditLogPage.tsx` |
+
+## 15. 选股分析（Screener Lab）
+
+### 15.1 定位
+
+将持仓看板的"被动观察"升级为"主动筛选 + AI 尽调"：从候选池挑出值得人工细看的股票，并对每只候选提供客观量化画像 + AI 深度分析。决策仍由人做。
+
+相对通用选股软件的**唯一独占优势**是：拥有主力基金持仓明细，因此打分体系必须把"主力资金行为"作为一等公民。
+
+### 15.2 页面入口
+
+`/screener`，与"持仓看板 / 基金列表 / 股票列表"在同一导航栏。复用 `dashboard:view` 权限（暂未单独设 `screener:view`）。
+
+页面自上而下三块：
+1. **顶部筛选条**：行业下拉 + 最低分数输入
+2. **候选表卡片**：表格 + 行展开因子面板 + 行操作"智能析股"按钮
+3. **通用 AI 对话卡片**：页面级内嵌，自由提问不绑定股票
+
+### 15.3 量化候选池（demo）
+
+当前为 **22 只 mock 候选**，覆盖 11 个行业，故意覆盖 4 种典型形态：
+
+| 形态 | 含义 |
+|---|---|
+| 低位高分（候选） | 位置因子低位 + 主力资金积极加仓 → 推荐重点关注 |
+| 高位低分（陷阱） | 位置因子高位 + 主力资金减仓 → 警示风险 |
+| 低位低分（观望） | 位置低但无主力动作 → 暂不关注 |
+| 中位高分（追强） | 中位 + 趋势向上 + 主力继续重仓 → 跟随强者 |
+
+数据形态仅用于演示，**不反映真实行情**。
+
+### 15.4 因子与评分体系
+
+每只候选按五组因子量化：
+
+| 组 | 字段 |
+|---|---|
+| **位置因子** | 近 1 年价格百分位、近 3 年价格百分位、距高点回撤、相对 MA60 的 z-score、RSI(14)、布林带位置、连续下跌天数、20 日均量比 |
+| **趋势与动量** | MA20/60/250 方向、近 20 / 60 日收益率 |
+| **主力资金行为** | 持有该股的主力基金数、合计持仓市值、季度环比加减仓、持仓基金平均近 1 年收益、"聪明钱"质量分 |
+| **估值** | PE-TTM 及近 3 年百分位、PB |
+| **重仓基金明细** | 基金代码 / 名称 / 规模 / 近 1 年收益 / 占净值 / 市值（5–10 只） |
+
+四维评分：**位置 / 趋势 / 主力资金 / 估值**，每维 0–100 分，总分为加权求和（权重后期可配）。
+
+### 15.5 智能析股（单股，右抽屉）
+
+- **触发**：候选行右侧"智能析股"按钮（lucide Sparkles 图标）
+- **打开**：右抽屉滑出，先展示 promptBuilder 预填的结构化提示词（含该股因子 + 持仓明细），可一键切到编辑模式修改
+- **发送**：后端 `/api/openclaw/chat` SSE 透传 OpenClaw `/v1/responses`
+- **流式渲染**：AI 回复逐 chunk 追加到消息气泡，`react-markdown` 渲染 GFM（`skipHtml` 防注入）
+- **多轮对话**：`previous_response_id` 由 sessionStorage 维护；关闭抽屉不丢失，可继续追问
+- **sessionStorage 隔离**：按 `openclaw:chat:{stockCode}` 隔离，每个股票独立会话
+- **限流**：同股 60s 内重复点击发送按钮 disable
+- **中断恢复**：SSE 中断时保留已渲染内容 + 黄色横幅 + 用上次的 `previous_response_id` 重连
+- **关闭时取消**：AbortController 终止进行中的 fetch
+
+### 15.6 通用 AI 对话（页面内嵌卡片）
+
+- **位置**：候选表卡片下方独立卡片，候选表同级
+- **不绑定股票**：`code` 字段不传给后端 → 后端 `_build_enriched_message` 透传不注入
+- **sessionStorage 隔离**：`openclaw:chat:general` 与单股对话完全独立
+- **限流**：同入口 60s 全局
+- **首屏**：空状态文案"开始对话吧 — 提问后按 Ctrl/Cmd + Enter 发送"
+
+### 15.7 OpenClaw 后端代理
+
+- **官方接口**：`POST {base_url}/v1/responses`（OpenResponses API，OpenAI 协议兼容）
+- **认证**：`Authorization: Bearer <token>`（token 存 `.env`，已 gitignore，前端永不接触）
+- **流式**：`stream: true` → SSE
+- **远程访问**：`ssh -N -L 18789:127.0.0.1:18789 user@网关机器`
+- **异常分类**：`OpenClawAuthError`（401）/ `OpenClawTimeoutError` / `OpenClawUnavailableError`（网络/5xx/未配置 token）/ 基类 `OpenClawError`
+- **HTTP 异常映射**：AuthError → 401 + 提示检查 token；TimeoutError → 504；UnavailableError → 503（token 缺失时也返回 503 + 明确文案）
+
+#### 路由清单
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/openclaw/health` | 探测 `{base_url}/health`，返回 `{ok, reachable, version, has_token}`，用于前端顶部横幅 |
+| POST | `/api/openclaw/chat` | 流式：`code` 可选（缺时透传不注入），SSE 响应 |
+| POST | `/api/openclaw/chat/sync` | 同步版：demo 期仅打日志（耗时 + 响应长度 + response_id） |
+| POST | `/api/openclaw/feedback` | demo 期仅打日志 |
+
+### 15.8 选股接口清单
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/screener/candidates?industry=&min_score=` | 候选列表，按 total_score 倒序，返回精简字段 |
+| GET | `/api/screener/factors/{code}` | 单只因子详情（不含 holders），404 if not found |
+| GET | `/api/screener/holders/{code}` | 单只重仓基金列表，404 if not found |
+| GET | `/api/screener/industries` | 候选行业列表（用于筛选下拉） |
+
+### 15.9 前端组件分层
+
+```
+ScreenerPage
+├── 顶部 OpenClaw 健康横幅（每 30s 探测）
+├── 候选表卡片
+│   ├── CandidateTable（含「智能析股」按钮 + 分数着色）
+│   └── FactorPanel（5 组因子 + 重仓基金 mini 表，行下折叠）
+├── 单股 AI 析股抽屉（AIChatDialog variant="drawer" mode={stock}）
+└── 通用 AI 对话卡片
+    └── AIChatDialog variant="embedded" mode="general"
+```
+
+**AIChatDialog 双形态**：
+- `variant="drawer"`：固定右侧抽屉（带遮罩，需 `open` + `onClose`）
+- `variant="embedded"`：内联卡片（无遮罩，消息区 `maxHeight: 480px`）
+
+**AIChatDialog 双模式**：
+- `{ kind: "stock", stock }`：预填结构化 prompt，按 stock.code 隔离
+- `{ kind: "general" }`：无预填，自由输入，sessionStorage 用 `openclaw:chat:general`
+
+### 15.10 当前边界
+
+**本期已做**：mock 候选池、量化因子画像、单股 AI 尽调、通用 AI 对话、OpenClaw HTTP 代理、SSE 流式、多轮对话、sessionStorage 持久化、限流、中断恢复。
+
+**本期明确不做**（待后续迭代）：
+- 真实抓取（东财 K 线 / AKShare 接入）
+- 因子计算引擎（百分位 / z-score / 均值回归统计全部 mock）
+- DB schema 改动（不新建表 `stock_kline_daily` / `stock_factor`）
+- RBAC 新权限码（`screener:view`，复用 `dashboard:view`）
+- 独立智能问答中心（per-stock chat drawer 是本期唯一对话入口）
+- 策略模板 / 权重可配置
+- 候选池跟踪 + 胜率统计
+- 图片 / 文件上传到 OpenClaw（API 支持，本期不接）
+- 客户端 tools 注入（让 AI 调用本系统 API）
+
+### 15.11 安全
+
+- `OPENCLAW_TOKEN` 仅通过 `.env` 注入；`.env` 已 gitignore；`.env.example` 仅含占位字段
+- 文档中如出现真实 token 立即脱敏（曾发生，已修）
+- AI 输出始终 `react-markdown skipHtml` 防 HTML/脚本注入
+- 前端 SSE 请求手动携带 Bearer token（不走 axios interceptor，因为不走 `client.ts`），token 来源 `localStorage.getItem("access_token")`
 

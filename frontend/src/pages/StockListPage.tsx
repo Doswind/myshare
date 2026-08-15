@@ -111,12 +111,11 @@ export default function StockListPage() {
     staleTime: Infinity,
   });
 
-  // 自选 Tab
+  // 自选 Tab（进页面即拉取，标签计数无需点击即可显示）
   const { data: watchlist = [], isLoading: wlLoading } = useQuery({
     queryKey: ["watchlist"],
     queryFn: fetchWatchlist,
     refetchInterval: 60_000,
-    enabled: tab === "watchlist",
   });
 
   // 持仓 Tab - 展平

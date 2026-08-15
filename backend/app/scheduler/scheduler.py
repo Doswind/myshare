@@ -180,6 +180,30 @@ def job_stock_details():
         JobGuard.release("sched_stock_details")
 
 
+def job_kline_incremental():
+    """K 线增量抓取（每个交易日 16:00 触发）
+    与 manual_kline_incremental 互斥。
+    """
+    if not JobGuard.acquire_sync("sched_kline_incremental"):
+        logger.warning("[sched] kline_incremental 跳过：同组任务正在运行")
+        return
+    log_id = _new_log("sched_kline_incremental", "定时：K 线增量抓取")
+    try:
+        from app.services.kline_service import fetch_and_store_all
+        result = fetch_and_store_all()
+        _finish_log(
+            log_id, "success",
+            items=result.get("success", 0),
+            err=("" if result.get("failed", 0) == 0 else f"failed={result.get('failed')} paused={result.get('paused')}"),
+        )
+        logger.info("[sched] kline_incremental done: %s", result)
+    except Exception as e:
+        logger.exception("[sched] kline_incremental failed")
+        _finish_log(log_id, "failed", err=str(e))
+    finally:
+        JobGuard.release("sched_kline_incremental")
+
+
 # job_key → 实际函数
 JOB_REGISTRY: Dict[str, Callable] = {
     "funds_full": job_funds_full,
@@ -187,6 +211,7 @@ JOB_REGISTRY: Dict[str, Callable] = {
     "quotes": job_quotes,
     "sectors": job_sectors,
     "stock_details": job_stock_details,
+    "kline_incremental": job_kline_incremental,
 }
 
 
@@ -239,6 +264,11 @@ def _in_window(now_t: dtime, start: Optional[dtime], end: Optional[dtime]) -> bo
 # ---------- 调度器 ----------
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
+# monthly / quarterly 的固定执行日（无 DB 列，业务策略常量）
+MONTHLY_DAY = 1                    # 每月 1 号
+QUARTERLY_MONTHS = "4,5,9,11"      # 披露后：4月年报 / 5月一季报 / 9月中报 / 11月三季报
+QUARTERLY_DAY = 5                  # 每季度当月 5 号
+
 
 def _build_trigger(cfg: CrawlConfig):
     """根据配置构造 trigger（None 表示不调度）"""
@@ -255,6 +285,17 @@ def _build_trigger(cfg: CrawlConfig):
             hour=t.hour,
             minute=t.minute,
             timezone="Asia/Shanghai",
+        )
+    if cfg.cron_type == "monthly":
+        t = _parse_hhmm(cfg.time_of_day) or dtime(21, 0)
+        return CronTrigger(
+            day=MONTHLY_DAY, hour=t.hour, minute=t.minute, timezone="Asia/Shanghai",
+        )
+    if cfg.cron_type == "quarterly":
+        t = _parse_hhmm(cfg.time_of_day) or dtime(21, 30)
+        return CronTrigger(
+            month=QUARTERLY_MONTHS, day=QUARTERLY_DAY,
+            hour=t.hour, minute=t.minute, timezone="Asia/Shanghai",
         )
     if cfg.cron_type == "interval":
         return IntervalTrigger(minutes=max(1, cfg.interval_minutes or 5), timezone="Asia/Shanghai")

@@ -132,7 +132,7 @@ export interface FilterDefaults {
 export interface CrawlConfig {
   job_key: string;
   display_name: string;
-  cron_type: "off" | "daily" | "weekly" | "interval";
+  cron_type: "off" | "daily" | "weekly" | "monthly" | "quarterly" | "interval";
   interval_minutes: number;
   time_of_day: string;       // HH:MM
   day_of_week: number;       // 0=周一 ... 6=周日（weekly 模式）

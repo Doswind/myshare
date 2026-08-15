@@ -244,6 +244,63 @@ async def trigger_fund_detail_refresh(background: BackgroundTasks, db: Session =
     return {"status": "started", "job_id": "manual_fund_nav", "log_id": log_id}
 
 
+# ---- K 线抓取任务 ----
+@router.post("/kline/incremental")
+async def trigger_kline_incremental(
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """手动触发：K 线增量抓取（按各股 last_trade_date → today，新股票自动补 6 年）"""
+    _acquire_or_fail("manual_kline_incremental", db)
+    from app.services.kline_service import fetch_and_store_all
+    from app.services.holdings_pool import get_holdings_pool
+    pool_size = len(get_holdings_pool(db))
+
+    def _task():
+        fetch_and_store_all()
+        return {"pool_size": pool_size}
+
+    log_id = await _log_start("manual_kline_incremental", "手动 K 线增量抓取")
+    asyncio.create_task(_run_with_log_id("manual_kline_incremental", "手动 K 线增量抓取", _task, log_id))
+    return {
+        "status": "started",
+        "job_id": "manual_kline_incremental",
+        "log_id": log_id,
+        "pool_size": pool_size,
+    }
+
+
+@router.post("/kline/{code}/unpause")
+async def unpause_kline_code(
+    code: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """复活单只股票（清零失败计数 + 取消 paused，需管理员）"""
+    if not user.is_admin:
+        raise HTTPException(403, "仅管理员可复活 K 线抓取")
+    from app.services.kline_service import unpause
+    ok = unpause(db, code)
+    if not ok:
+        raise HTTPException(404, f"股票 {code} 没有抓取记录")
+    return {"ok": True, "code": code}
+
+
+@router.get("/kline/status")
+async def kline_status(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """K 线抓取池状态汇总"""
+    from app.services.kline_service import get_tracking_status
+    from app.services.holdings_pool import get_holdings_pool
+    return {
+        **get_tracking_status(db),
+        "pool_size": len(get_holdings_pool(db)),
+    }
+
+
 # ---- 维护接口 ----
 @router.get("/running")
 async def list_running_jobs(

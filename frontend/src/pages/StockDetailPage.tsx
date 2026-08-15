@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchStock, fetchStockQuote, fetchFundsHoldingStock } from "@/api/stocks";
+import { KLineTab } from "@/components/stock/KLineTab";
 import {
   ArrowLeft,
   ExternalLink,
@@ -38,7 +39,7 @@ export default function StockDetailPage() {
     enabled: !!stockCode,
   });
 
-  // 沪市 1 / 深市 0 -> sh / sz
+// 沪市 1 / 深市 0 -> sh / sz
   const market = stock?.market === 1 ? "sh" : "sz";
   const marketCN = stock?.market === 1 ? "沪" : "深";
   const marketPrefix = stock?.market === 1 ? "SH" : "SZ";
@@ -72,11 +73,8 @@ export default function StockDetailPage() {
         desc: "讨论 / 研报 / 公告",
       },
     ],
-    [market, marketPrefix, stockCode]
+    [market, marketPrefix, stockCode],
   );
-
-  // 东财行情页（含完整 K线 / 分时 / 资金流向），iframe 嵌入用
-  const klineUrl = `https://quote.eastmoney.com/${market}${stockCode}.html`;
 
   return (
     <div className="space-y-3">
@@ -245,29 +243,7 @@ export default function StockDetailPage() {
 
       {/* Tab: K线 / 资料 */}
       {tab === "kline" && (
-        <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
-          <div className="px-3 py-2 border-b border-slate-100 text-[12px] text-slate-700 font-medium flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <BarChart3 className="w-3 h-3" /> K线图
-            </span>
-            <div className="flex items-center gap-2 text-[11px]">
-              <a
-                href={klineUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-blue-500 hover:text-blue-700 flex items-center gap-0.5"
-              >
-                全屏打开 <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          </div>
-          <iframe
-            src={klineUrl}
-            className="w-full bg-white h-[420px] sm:h-[560px]"
-            title="K线图"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-          />
-        </div>
+        <KLineTab code={stockCode} stockName={stock?.name} />
       )}
 
       {/* Tab: 重仓基金 */}

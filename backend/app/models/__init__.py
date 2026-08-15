@@ -8,6 +8,7 @@ from app.models.job_log import JobLog
 from app.models.watchlist import Watchlist
 from app.models.crawl_config import CrawlConfig
 from app.models.user_filter_preference import UserFilterPreference
+from app.models.kline import StockKlineDaily, StockKlineTracking
 
 __all__ = [
     "Fund",
@@ -20,4 +21,6 @@ __all__ = [
     "Watchlist",
     "CrawlConfig",
     "UserFilterPreference",
+    "StockKlineDaily",
+    "StockKlineTracking",
 ]

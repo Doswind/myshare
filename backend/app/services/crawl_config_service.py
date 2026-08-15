@@ -19,13 +19,12 @@ DEFAULTS: List[Dict[str, Any]] = [
     {
         "job_key": "funds_full",
         "display_name": "基金列表+持仓",
-        "cron_type": "weekly",
-        "day_of_week": 0,
+        "cron_type": "quarterly",
         "time_of_day": "21:30",
-        "trading_only": True,
-        "trading_only_locked": True,
+        "trading_only": False,
+        "trading_only_locked": False,
         "enabled": True,
-        "description": f"全量抓基金列表(按阈值过滤) + 持仓，每周一 21:30 执行；若当日为节假日则本周跳过（基金季报数据变化慢，影响小）。{LOCKED_REASON}",
+        "description": "全量抓基金列表(按阈值过滤) + 持仓。基金季报按季度披露，故每季度抓一次，固定在披露完成后的 4/5/9/11 月 5 号 21:30（分别对应年报/一季报/中报/三季报）；数据静态，非交易日也照常执行。",
     },
     {
         "job_key": "fund_nav",
@@ -52,12 +51,12 @@ DEFAULTS: List[Dict[str, Any]] = [
     {
         "job_key": "sectors",
         "display_name": "行业+成分股",
-        "cron_type": "daily",
+        "cron_type": "monthly",
         "time_of_day": "21:00",
-        "trading_only": True,
-        "trading_only_locked": True,
+        "trading_only": False,
+        "trading_only_locked": False,
         "enabled": True,
-        "description": f"刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name。{LOCKED_REASON}",
+        "description": "刷新 24 个行业板块 + 成分股，反向填充 stock.industry_name。行业分类慢变，每月 1 号 21:00 抓一次即可；数据静态，非交易日也照常执行。",
     },
     {
         "job_key": "stock_details",
@@ -68,6 +67,16 @@ DEFAULTS: List[Dict[str, Any]] = [
         "trading_only_locked": True,
         "enabled": True,
         "description": f"回填持仓股的 industry_name（行业名称稳定，节假日不变）。{LOCKED_REASON}",
+    },
+    {
+        "job_key": "kline_incremental",
+        "display_name": "K 线增量抓取",
+        "cron_type": "daily",
+        "time_of_day": "16:00",
+        "trading_only": True,
+        "trading_only_locked": True,
+        "enabled": True,
+        "description": f"每个交易日 16:00 增量刷新持仓池的日 K 历史（按各股 last_trade_date → today，UPSERT）。新股票首次自动补满 6 年历史。{LOCKED_REASON}",
     },
 ]
 

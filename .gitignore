@@ -26,6 +26,9 @@ data/
 *.log
 logs/
 
+# 运行时 PID 文件（scripts/dev.sh 生成）
+.run/
+
 # 环境变量
 .env
 .env.local
