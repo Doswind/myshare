@@ -119,7 +119,8 @@ def _finalize_session(session_id: int, response_id: Optional[str]) -> None:
 
 
 async def _run(assistant_msg_id: int, session_id: int, message: str,
-               previous_response_id: Optional[str], attachments: Optional[list]) -> None:
+               previous_response_id: Optional[str], attachments: Optional[list],
+               user: Optional[str] = None) -> None:
     """后台生成任务：消费 SSE，累积 + 广播 + 节流落库，结束落定。"""
     state = ACTIVE[assistant_msg_id]
     loop = asyncio.get_event_loop()
@@ -130,6 +131,7 @@ async def _run(assistant_msg_id: int, session_id: int, message: str,
             message=message,
             previous_response_id=previous_response_id,
             attachments=attachments,
+            user=user,
         ):
             # 上游错误事件
             if isinstance(event, dict) and event.get("type") == "error":
@@ -169,11 +171,12 @@ async def _run(assistant_msg_id: int, session_id: int, message: str,
 
 def start_generation(assistant_msg_id: int, session_id: int, message: str,
                      previous_response_id: Optional[str] = None,
-                     attachments: Optional[list] = None) -> None:
+                     attachments: Optional[list] = None,
+                     user: Optional[str] = None) -> None:
     """注册 GenState 并起后台任务。要求 assistant 消息行已建好(status=running)。"""
     ACTIVE[assistant_msg_id] = GenState()
     asyncio.create_task(
-        _run(assistant_msg_id, session_id, message, previous_response_id, attachments)
+        _run(assistant_msg_id, session_id, message, previous_response_id, attachments, user)
     )
 
 

@@ -58,7 +58,7 @@ class SessionMessageRequest(BaseModel):
     attachments: Optional[List[ChatAttachment]] = None
 
 
-def _own_session_or_404(db: Session, sid: int, user: User) -> ChatSession:
+def _own_session_or_404(db: Session, sid: str, user: User) -> ChatSession:
     sess = db.query(ChatSession).filter(
         ChatSession.id == sid, ChatSession.user_id == user.id
     ).first()
@@ -265,7 +265,7 @@ async def list_sessions(db: Session = Depends(get_db), user: User = Depends(get_
 
 
 @router.get("/sessions/{sid}")
-async def get_session(sid: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def get_session(sid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """会话详情 + 全部消息"""
     sess = _own_session_or_404(db, sid, user)
     msgs = (
@@ -278,7 +278,7 @@ async def get_session(sid: int, db: Session = Depends(get_db), user: User = Depe
 
 
 @router.delete("/sessions/{sid}")
-async def delete_session(sid: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def delete_session(sid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """删除会话及其消息"""
     sess = _own_session_or_404(db, sid, user)
     db.query(ChatMessage).filter(ChatMessage.session_id == sid).delete()
@@ -289,7 +289,7 @@ async def delete_session(sid: int, db: Session = Depends(get_db), user: User = D
 
 @router.post("/sessions/{sid}/messages")
 async def send_session_message(
-    sid: int,
+    sid: str,
     req: SessionMessageRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -323,19 +323,22 @@ async def send_session_message(
 
     enriched = _build_enriched_message(req.code, req.message.strip())
     attachments = [a.model_dump() for a in req.attachments] if req.attachments else None
+    # 用 user + 会话 uuid（即会话主键 id）作为 OpenClaw 会话标识，同一会话内一致
+    user_field = f"{user.username}-{sess.id}"
     openclaw_session_service.start_generation(
         assistant_msg_id=assistant_msg.id,
         session_id=sid,
         message=enriched,
         previous_response_id=sess.last_response_id,
         attachments=attachments,
+        user=user_field,
     )
     return {"user_message_id": user_msg.id, "assistant_message_id": assistant_msg.id}
 
 
 @router.get("/sessions/{sid}/stream")
 async def stream_session_message(
-    sid: int,
+    sid: str,
     message_id: int = Query(..., description="assistant 消息 id"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),

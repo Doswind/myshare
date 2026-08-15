@@ -5,11 +5,11 @@ import type { ChatSessionMeta } from "@/api/openclawSessions";
 
 interface Props {
   sessions: ChatSessionMeta[];
-  activeId: number | null;
+  activeId: string | null;
   loading?: boolean;
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
   onNew: () => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: string) => void;
 }
 
 function fmtTime(iso: string | null): string {
@@ -25,7 +25,7 @@ function fmtTime(iso: string | null): string {
 
 /** 左侧历史会话列表：新建 / 选择 / 删除（二次确认） */
 export function SessionList({ sessions, activeId, loading, onSelect, onNew, onDelete }: Props) {
-  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col w-[200px] shrink-0 border-r border-slate-200 bg-slate-50/60">

@@ -1,12 +1,14 @@
 """AI 对话会话与消息模型（按用户隔离）
 
-- ChatSession：一个用户的一次对话会话；title 取首条用户消息摘要；
+- ChatSession：一个用户的一次对话会话；主键 id 直接用 uuid（同时作为 OpenClaw
+  user 字段的会话标识：user = "{用户名}-{session.id}"）；title 取首条用户消息摘要；
   last_response_id 用于 OpenClaw 多轮上下文续接。
-- ChatMessage：会话内的消息；assistant 消息有 status（running/done/error），
-  支持"后台生成、断线续接"——生成中 status=running，落库内容随生成推进更新。
+- ChatMessage：会话内的消息；session_id 指向 chat_session.id（uuid 字符串）。
+  assistant 消息有 status（running/done/error），支持"后台生成、断线续接"。
   attachments 仅存元信息（文件名/类型），不存 base64 原文。
 """
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, Index
 
@@ -14,10 +16,11 @@ from app.database import Base
 
 
 class ChatSession(Base):
-    """用户对话会话"""
+    """用户对话会话（主键为 uuid）"""
     __tablename__ = "chat_session"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()),
+                comment="会话 uuid（主键，同时用于拼 OpenClaw user 字段）")
     user_id = Column(Integer, nullable=False, index=True, comment="所属用户 id")
     title = Column(String(80), nullable=False, default="新会话", comment="会话标题（取首条用户消息摘要）")
     last_response_id = Column(String(120), nullable=True, comment="OpenClaw 多轮上下文 response_id")
@@ -43,7 +46,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_message"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(Integer, nullable=False, index=True, comment="所属会话 id")
+    session_id = Column(String(36), nullable=False, index=True, comment="所属会话 id（chat_session.id / uuid）")
     role = Column(String(16), nullable=False, comment="user / assistant")
     content = Column(Text, nullable=False, default="", comment="消息内容（assistant 生成中会持续更新）")
     status = Column(String(16), nullable=False, default="done", comment="done / running / error（user 恒 done）")

@@ -2,7 +2,7 @@ import client from "./client";
 import type { ChatAttachment } from "./openclaw";
 
 export interface ChatSessionMeta {
-  id: number;
+  id: string;
   title: string;
   last_response_id: string | null;
   created_at: string | null;
@@ -11,7 +11,7 @@ export interface ChatSessionMeta {
 
 export interface ChatMessage {
   id: number;
-  session_id: number;
+  session_id: string;
   role: "user" | "assistant";
   content: string;
   status: "done" | "running" | "error";
@@ -35,14 +35,14 @@ export const createSession = () =>
 export const listSessions = () =>
   client.get<ChatSessionMeta[]>("/openclaw/sessions").then((r) => r.data);
 
-export const getSession = (sid: number) =>
+export const getSession = (sid: string) =>
   client.get<ChatSessionDetail>(`/openclaw/sessions/${sid}`).then((r) => r.data);
 
-export const deleteSession = (sid: number) =>
+export const deleteSession = (sid: string) =>
   client.delete(`/openclaw/sessions/${sid}`).then((r) => r.data);
 
 export const sendSessionMessage = (
-  sid: number,
+  sid: string,
   body: { message: string; code?: string; attachments?: ChatAttachment[] },
 ) =>
   client
@@ -63,7 +63,7 @@ export interface StreamSessionCallbacks {
  * 首发与"切回续接"都用它：backlog 一次性补齐已生成内容，随后续接实时 delta。
  */
 export async function streamSession(
-  sid: number,
+  sid: string,
   messageId: number,
   cbs: StreamSessionCallbacks,
   signal?: AbortSignal,

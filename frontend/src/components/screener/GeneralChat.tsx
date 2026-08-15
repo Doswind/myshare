@@ -59,7 +59,7 @@ export function GeneralChat({
 
   const [sessions, setSessions] = useState<ChatSessionMeta[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
@@ -93,7 +93,7 @@ export function GeneralChat({
 
   // 订阅（首发 / 续接通用）：backlog 覆盖，delta 追加，done/error 落定
   const subscribe = useCallback(
-    (sid: number, assistantId: number) => {
+    (sid: string, assistantId: number) => {
       abortRef.current?.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
@@ -122,7 +122,7 @@ export function GeneralChat({
 
   // 加载会话详情；若末条 assistant 仍 running → 自动续接
   const loadSession = useCallback(
-    async (sid: number) => {
+    async (sid: string) => {
       abortRef.current?.abort();
       setErrorMsg(null);
       try {
@@ -151,9 +151,9 @@ export function GeneralChat({
       const rows = await refreshSessions();
       setSessionsLoading(false);
       if (cancelled) return;
-      let target: number | null = null;
+      let target: string | null = null;
       try {
-        const stored = Number(localStorage.getItem(ACTIVE_KEY));
+        const stored = localStorage.getItem(ACTIVE_KEY);
         if (stored && rows.some((s) => s.id === stored)) target = stored;
       } catch {
         /* ignore */
@@ -204,7 +204,7 @@ export function GeneralChat({
   }, [messages, scrollToBottom]);
 
   // PLACEHOLDER_ACTIONS
-  function selectSession(id: number) {
+  function selectSession(id: string) {
     if (id === activeId) return;
     setActiveId(id);
     loadSession(id);
@@ -224,7 +224,7 @@ export function GeneralChat({
     }
   }
 
-  async function removeSession(id: number) {
+  async function removeSession(id: string) {
     try {
       await deleteSession(id);
     } catch {

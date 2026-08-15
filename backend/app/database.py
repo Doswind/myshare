@@ -67,6 +67,67 @@ def _migrate_columns():
     if "stock" in insp.get_table_names():
         _migrate_stock_details_fetched_at()
 
+    if "chat_session" in insp.get_table_names():
+        _migrate_chat_session_to_uuid()
+
+
+def _migrate_chat_session_to_uuid():
+    """把 chat_session 主键从自增 int 改为 uuid（并把 chat_message.session_id 对应改为 uuid）。
+
+    兼容两种旧状态：原始(int id, 无 uuid 列) / 中间(int id + uuid 列)。
+    已是 uuid 主键则跳过。数据非破坏性迁移（复制后重建）。
+    """
+    from sqlalchemy import inspect, text
+    from uuid import uuid4
+    insp = inspect(engine)
+    cols_info = insp.get_columns("chat_session")
+    cols = {c["name"] for c in cols_info}
+    id_col = next((c for c in cols_info if c["name"] == "id"), None)
+    id_type = str(id_col["type"]).upper() if id_col else ""
+    is_int_pk = "INT" in id_type
+    if not is_int_pk and "uuid" not in cols:
+        return  # 已是 uuid 主键
+
+    has_msg = "chat_message" in insp.get_table_names()
+    with engine.begin() as conn:
+        sess_rows = [dict(r) for r in conn.execute(text("SELECT * FROM chat_session")).mappings().all()]
+        msg_rows = (
+            [dict(r) for r in conn.execute(text("SELECT * FROM chat_message")).mappings().all()]
+            if has_msg else []
+        )
+        id_map = {}
+        for r in sess_rows:
+            id_map[r["id"]] = r.get("uuid") or str(uuid4())
+        conn.execute(text("DROP TABLE IF EXISTS chat_message"))
+        conn.execute(text("DROP TABLE chat_session"))
+
+    # 用新 schema（uuid 主键）重建
+    from app.models.chat import ChatSession, ChatMessage
+    ChatSession.__table__.create(bind=engine, checkfirst=True)
+    ChatMessage.__table__.create(bind=engine, checkfirst=True)
+
+    with engine.begin() as conn:
+        for r in sess_rows:
+            conn.execute(
+                text(
+                    "INSERT INTO chat_session (id, user_id, title, last_response_id, created_at, updated_at) "
+                    "VALUES (:id,:user_id,:title,:lrid,:ca,:ua)"
+                ),
+                {"id": id_map[r["id"]], "user_id": r["user_id"], "title": r.get("title") or "新会话",
+                 "lrid": r.get("last_response_id"), "ca": r.get("created_at"), "ua": r.get("updated_at")},
+            )
+        for r in msg_rows:
+            conn.execute(
+                text(
+                    "INSERT INTO chat_message (id, session_id, role, content, status, error, attachments, created_at) "
+                    "VALUES (:id,:sid,:role,:content,:status,:error,:att,:ca)"
+                ),
+                {"id": r["id"], "sid": id_map.get(r["session_id"]), "role": r["role"],
+                 "content": r.get("content") or "", "status": r.get("status") or "done",
+                 "error": r.get("error"), "att": r.get("attachments"), "ca": r.get("created_at")},
+            )
+    logger.info("DB 迁移: chat_session 主键改为 uuid，重建 %d 会话 / %d 消息", len(sess_rows), len(msg_rows))
+
 
 def _migrate_stock_details_fetched_at():
     """stock 表加 details_fetched_at 列：用于详情抓取的 TTL 缓存
