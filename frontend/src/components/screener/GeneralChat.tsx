@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, Square, Sparkles, Zap, X, AlertTriangle } from "lucide-react";
+import { Send, Square, Sparkles, Zap, X, AlertTriangle, Menu } from "lucide-react";
 import clsx from "clsx";
 
 import { MarkdownMessage } from "./MarkdownMessage";
@@ -66,6 +66,7 @@ export function GeneralChat({
   const [streaming, setStreaming] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sendMode, setSendMode] = useState<SendMode>(() => loadSendMode());
+  const [mobileListOpen, setMobileListOpen] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -205,12 +206,14 @@ export function GeneralChat({
 
   // PLACEHOLDER_ACTIONS
   function selectSession(id: string) {
+    setMobileListOpen(false);
     if (id === activeId) return;
     setActiveId(id);
     loadSession(id);
   }
 
   async function newSession() {
+    setMobileListOpen(false);
     abortRef.current?.abort();
     setStreaming(false);
     setErrorMsg(null);
@@ -350,26 +353,57 @@ export function GeneralChat({
   const inner = (
     <div
       className={clsx(
-        "flex bg-white",
+        "flex bg-white relative overflow-hidden",
         isDrawer ? "h-full w-full sm:w-[560px] shadow-xl border-l border-slate-200" : "h-[520px]",
       )}
     >
       {showList && (
-        <SessionList
-          sessions={sessions}
-          activeId={activeId}
-          loading={sessionsLoading}
-          onSelect={selectSession}
-          onNew={newSession}
-          onDelete={removeSession}
-        />
+        <>
+          {/* 桌面端：常驻侧栏 */}
+          <div className="hidden sm:flex">
+            <SessionList
+              sessions={sessions}
+              activeId={activeId}
+              loading={sessionsLoading}
+              onSelect={selectSession}
+              onNew={newSession}
+              onDelete={removeSession}
+            />
+          </div>
+          {/* 手机端：浮层抽屉 */}
+          {mobileListOpen && (
+            <div className="sm:hidden absolute inset-0 z-20 flex">
+              <div className="absolute inset-0 bg-black/20" onClick={() => setMobileListOpen(false)} />
+              <div className="relative h-full bg-white shadow-xl">
+                <SessionList
+                  sessions={sessions}
+                  activeId={activeId}
+                  loading={sessionsLoading}
+                  onSelect={selectSession}
+                  onNew={newSession}
+                  onDelete={removeSession}
+                  onCloseMobile={() => setMobileListOpen(false)}
+                />
+              </div>
+            </div>
+          )}
+        </>
       )}
       <div className="flex flex-col flex-1 min-w-0">
         {/* 顶栏 */}
         <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-200 bg-slate-50 text-[12px] text-slate-700 font-medium">
+          {showList && (
+            <button
+              onClick={() => setMobileListOpen(true)}
+              className="sm:hidden -ml-1 mr-0.5 flex items-center justify-center w-6 h-6 rounded text-slate-500 hover:bg-slate-200"
+              title="会话列表"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+          )}
           <Sparkles className="w-3.5 h-3.5 text-blue-500" />
           <span>{headerTitle}</span>
-          <span className="text-[10px] text-slate-400 font-normal ml-1">
+          <span className="text-[10px] text-slate-400 font-normal ml-1 hidden sm:inline">
             对话保存在服务端 · 生成中可切页，后台继续
           </span>
           {isDrawer && onClose && (

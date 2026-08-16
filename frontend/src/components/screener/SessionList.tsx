@@ -10,6 +10,8 @@ interface Props {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  /** 手机浮层模式下显示关闭按钮 */
+  onCloseMobile?: () => void;
 }
 
 function fmtTime(iso: string | null): string {
@@ -24,19 +26,30 @@ function fmtTime(iso: string | null): string {
 }
 
 /** 左侧历史会话列表：新建 / 选择 / 删除（二次确认） */
-export function SessionList({ sessions, activeId, loading, onSelect, onNew, onDelete }: Props) {
+export function SessionList({ sessions, activeId, loading, onSelect, onNew, onDelete, onCloseMobile }: Props) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   return (
-    <div className="flex flex-col w-[200px] shrink-0 border-r border-slate-200 bg-slate-50/60">
-      <button
-        onClick={onNew}
-        className="flex items-center justify-center gap-1 m-2 px-2 py-1.5 rounded-md bg-blue-500 text-white text-[12px] hover:bg-blue-600"
-        title="开启一个新对话"
-      >
-        <Plus className="w-3.5 h-3.5" />
-        新建会话
-      </button>
+    <div className="flex flex-col w-[200px] shrink-0 border-r border-slate-200 bg-slate-50/60 h-full">
+      <div className="flex items-center gap-1 m-2">
+        <button
+          onClick={onNew}
+          className="flex items-center justify-center gap-1 flex-1 px-2 py-1.5 rounded-md bg-blue-500 text-white text-[12px] hover:bg-blue-600"
+          title="开启一个新对话"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          新建会话
+        </button>
+        {onCloseMobile && (
+          <button
+            onClick={onCloseMobile}
+            className="sm:hidden flex items-center justify-center w-8 h-8 rounded-md text-slate-500 hover:bg-slate-200"
+            title="关闭会话列表"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
       <div className="flex-1 overflow-auto px-1.5 pb-2 space-y-0.5">
         {loading && (
           <div className="text-center text-slate-400 py-4 text-[11px]">加载中…</div>

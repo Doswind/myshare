@@ -1,4 +1,3 @@
-import { useState } from "react";
 import clsx from "clsx";
 
 interface RangeSliderProps {
@@ -61,20 +60,19 @@ export function DoubleRangeSlider({
   suffix = "",
   onChange,
 }: DoubleRangeSliderProps) {
-  const [localMin, setLocalMin] = useState<number>(valueMin ?? min);
-  const [localMax, setLocalMax] = useState<number>(valueMax ?? max);
+  // 完全受控：显示值直接来自 props（store），异步恢复偏好后能正确回填。
+  // 空字符串视为「不限」(null)。
   return (
     <div className="flex items-center gap-2 w-full sm:min-w-[220px]">
       <span className="text-[11px] text-slate-500 whitespace-nowrap">{label}</span>
       <input
         type="number"
-        value={localMin}
+        value={valueMin ?? ""}
         min={min}
-        max={localMax}
+        max={valueMax ?? max}
         step={step}
         onChange={(e) => {
           const v = e.target.value === "" ? null : Number(e.target.value);
-          setLocalMin(Number(e.target.value));
           onChange(v, valueMax);
         }}
         className="w-16 px-1.5 py-0.5 text-[12px] border border-slate-300 rounded tabular"
@@ -83,13 +81,13 @@ export function DoubleRangeSlider({
       <span className="text-slate-400">~</span>
       <input
         type="number"
-        value={localMax}
-        min={localMin}
+        value={valueMax ?? ""}
+        min={valueMin ?? min}
         max={max}
         step={step}
         onChange={(e) => {
-          setLocalMax(Number(e.target.value));
-          onChange(valueMin, Number(e.target.value));
+          const v = e.target.value === "" ? null : Number(e.target.value);
+          onChange(valueMin, v);
         }}
         className="w-16 px-1.5 py-0.5 text-[12px] border border-slate-300 rounded tabular"
         placeholder="不限"
