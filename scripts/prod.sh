@@ -89,6 +89,7 @@ cmd_start_backend() {
     PYTHONPATH="$BACKEND_DIR" \
       nohup "$py" -m uvicorn app.main:app \
         --host "$BIND_HOST" --port "$BACKEND_PORT" \
+        --reload --log-level warning \
         --workers 1 --log-level info \
         >"$BACKEND_LOG" 2>&1 &
     echo $! > "$BACKEND_PID_FILE"
